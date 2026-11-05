@@ -1,0 +1,16 @@
+{
+  "id": "com.fontmanager.example.specimen-export",
+  "name": "示例文本导出",
+  "version": "1.1.0",
+  "apiLevel": 1,
+  "entry": "main.py",
+  "interpreter": "python",
+  "description": "右键字族 → 把示例文本导出成 PNG（保存位置可自己设）；启动时自动跑一遍 API / 权限自检",
+  "permissions": ["read:fonts", "read:curation", "write:curation"],
+  "hooks": ["init", "context-menu"],
+  "menus": [
+    { "title": "导出示例图（PNG）", "on": "family" },
+    { "title": "设置导出位置…", "on": "family" },
+    { "title": "打开导出文件夹", "on": "family" }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "com.fontmanager.example.font-stats",
+  "name": "字体使用统计（示例）",
+  "version": "1.0.0",
+  "apiLevel": 1,
+  "description": "右键一个字族 → 统计它的字面数与版权分类，结果写进备注",
+  "entry": "main.py",
+  "interpreter": "python",
+  "permissions": ["read:fonts", "write:curation"],
+  "hooks": ["context-menu"],
+  "menus": [
+    { "title": "统计这个字族", "on": "family" }
+  ]
+}
