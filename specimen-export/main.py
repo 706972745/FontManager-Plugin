@@ -10,12 +10,14 @@
 - 收 stdin 的 JSON 行：{"type":"init", apiBase, apiToken, ...} / {"type":"invoke", hook, payload}
 - 发 stdout 的 JSON 行：{"type":"log", message} / {"type":"toast", message}
 
+设置面板走 settings 钩子（有 tkinter 才有窗口，没有就退化成文件夹选择框）。
 只依赖标准库 + Pillow（Pillow 缺失时降级成「只报错不出图」，不会崩）。
 """
 import json
 import os
 import re
 import sys
+import threading
 import time
 import traceback
 import urllib.error
@@ -320,11 +322,77 @@ def set_export_folder():
         emit("toast", f"以后示例图保存到：{picked}")
 
 
+def open_settings_panel():
+    """settings 钩子：在插件进程里弹一块**自己的**设置面板（FontManager 1.3.7+）。
+
+    主程序只负责把钩子发过来（设置 → 插件 → 该行右侧的齿轮），面板长什么样、
+    怎么存，全由插件自己决定。两个注意点：
+
+    - **必须另起线程**跑 tkinter 的主循环。面板开着的时候 stdin 里还会来别的调用
+      （右键菜单、再点一次齿轮），在主线程里 mainloop 等于把插件堵死。
+    - 没装 tkinter 的精简版 Python 上，退化成系统文件夹选择框，不报错、不崩。
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception:
+        set_export_folder()
+        return
+
+    def run():
+        root = tk.Tk()
+        root.title("示例文本导出 · 设置")
+        root.attributes("-topmost", True)
+        root.resizable(False, False)
+        var = tk.StringVar(value=export_dir())
+        frame = tk.Frame(root, padx=14, pady=12)
+        frame.pack()
+        tk.Label(frame, text="示例图的保存位置", anchor="w").grid(
+            row=0, column=0, columnspan=3, sticky="w"
+        )
+        tk.Entry(frame, textvariable=var, width=46).grid(
+            row=1, column=0, columnspan=3, sticky="we", pady=(4, 10)
+        )
+
+        def browse():
+            picked = filedialog.askdirectory(
+                title="选择示例图的保存位置", initialdir=var.get() or export_dir()
+            )
+            if picked:
+                var.set(picked)
+
+        def save():
+            target = (var.get() or "").strip()
+            if not target:
+                emit("toast", "导出位置不能为空")
+                return
+            if save_config({"exportDir": target}):
+                emit("toast", f"以后示例图保存到：{target}")
+                log(f"设置面板：导出位置改为 {target}")
+                root.destroy()
+
+        tk.Button(frame, text="选择…", width=8, command=browse).grid(row=2, column=0, sticky="w")
+        tk.Button(frame, text="保存", width=8, command=save).grid(row=2, column=1, padx=6)
+        tk.Button(frame, text="关闭", width=8, command=root.destroy).grid(row=2, column=2, sticky="e")
+        tk.Label(
+            frame,
+            text="保存后立即生效；也可以直接改插件目录里的 config.json。",
+            fg="#888",
+        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        root.mainloop()
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def handle_invoke(hook, payload):
+    payload = payload or {}
+    # 齿轮（设置 → 插件 → 该行右侧）：插件自己弹设置面板，不依赖具体字族
+    if hook == "settings":
+        open_settings_panel()
+        return
     if hook != "context-menu":
         log(f"收到未处理的钩子：{hook}")
         return
-    payload = payload or {}
     family = payload.get("family") or ""
     menu = payload.get("menu") or ""
 

@@ -13,7 +13,8 @@
   ],
   "hooks": [
     "init",
-    "context-menu"
+    "context-menu",
+    "settings"
   ],
   "menus": [
     {
@@ -22,12 +23,16 @@
     },
     {
       "title": "设置导出位置…",
-      "on": "family"
+      "on": "plugin"
     },
     {
       "title": "打开导出文件夹",
-      "on": "family"
+      "on": "plugin"
     }
   ],
-  "interpreterPath": "runtime/python.exe"
+  "interpreterPath": "runtime/python.exe",
+  "settings": {
+    "title": "示例文本导出 · 设置",
+    "hook": "settings"
+  }
 }
