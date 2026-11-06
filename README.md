@@ -68,9 +68,32 @@
 
 ## 🔐 权限
 
-每个插件在自己的 `plugin.json` 里声明所需权限（如 `read:fonts`、`write:curation`），
-FontManager 只给声明过的：插件拿到的是**受限令牌**，越权请求会被 API 直接拒绝（403）。
-所有请求都可查（`%APPDATA%\FontManager\activation.log`）。
+每个插件在自己的 `plugin.json` 里声明所需权限，FontManager 只给声明过的：插件拿到的是
+**受限令牌**，越权请求被 API 直接拒绝（**403**，正文会写明缺哪一项）。
+
+| 权限 | 能做什么 | 写它的理由 |
+|---|---|---|
+| `read:fonts` | 读字体 / 字族清单、启用状态 | 「库里有没有这款字」 |
+| `write:fonts` | **启用 / 停用 / 重扫** | 改的是系统级状态，**能不给就不给** |
+| `read:snapshot` / `write:snapshot` | 看 / 建 / 删 / 应用方案快照 | 批量切换字体方案 |
+| `read:curation` / `write:curation` | 读 / 改你写的标签、备注、评分、收藏 | 备注里可能有私事，`read:` 也要慎重 |
+| `export` | 触发打包导出、查进度 | 导出字体包 |
+| `import` | 导入字体包 | 装字体 |
+
+判断顺序是 **401（没令牌）→ 403（没这项权限）→ 422（请求体格式错）**：权限检查在解析
+请求体**之前**，所以缺权限永远是 403，看到 422 说明权限够了、是参数写错了。
+
+**报 403 怎么修**：把缺的那项加进**插件自己**的 `plugin.json` → `permissions`，然后
+设置 → 插件 →「重新扫描」（或关掉开关再打开）——令牌是启用时签发的，不重启不会变。
+**不需要改 FontManager。** 想知道自己手里到底有什么，读 `GET /health` 的 `permissions`
+（`tokenName` 是令牌名，`allPermissions` 才是全部可用权限）。
+
+> ⚠️ **别写 `"permissions": ["*"]`**：主程序不会过滤，写了就是**全权**。
+> 权限边界靠的是这一行写得够窄。
+>
+> 完整权限表、`perm_for` 的判定逻辑、加新接口的规矩，见
+> [插件开发指南 · 权限](https://github.com/706972745/FontManager/blob/main/docs/PLUGINS.md#权限403-到底是谁拦的)。
+> 所有请求都可查（`%APPDATA%\FontManager\activation.log`）。
 
 ## 🛠️ 自己写一个
 
