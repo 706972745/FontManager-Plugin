@@ -137,30 +137,75 @@ def build_plan(api, cfg, state, only_family=None, log=print):
     return todo, skipped
 
 
-def ensure_repo(gh, cfg, state, log=print):
+def resolve_target(gh, cfg):
+    """算出「要往哪个账号的哪个仓库同步」：(login, owner, name)。不联网。"""
+    login = ""
+    try:
+        login = (gh.whoami() or {}).get("login") or ""
+    except Exception:
+        login = ""
+    owner = (cfg.get("owner") or login).strip()
+    name = (cfg.get("repoName") or "").strip()
+    return login, owner, name
+
+
+def check_repo(gh, owner, name):
+    """设置面板用：一次性把「这个库能不能用」说清楚。"""
+    if not owner or not name:
+        return {"ok": False, "message": "先填账号和仓库名"}
+    try:
+        st = gh.repo_state(owner, name)
+    except Exception as e:
+        return {"ok": False, "message": f"查不到 {owner}/{name}：{e}"}
+    if not st["exists"]:
+        return {"ok": True, "willCreate": True,
+                "message": f"{owner}/{name} 还不存在 —— 保存后第一次同步会自动建成私有仓"}
+    if not st["private"]:
+        return {"ok": False, "message": f"{owner}/{name} 是**公开**仓库，同步已被禁止（先改成私有）"}
+    if st["anonymousReadable"]:
+        return {"ok": False, "message": f"{owner}/{name} 能匿名读取，同步已被禁止（检查仓库可见性）"}
+    if st["empty"]:
+        return {"ok": True, "willInit": True,
+                "message": f"{owner}/{name} 是空仓库 —— 首次同步会自动放一个 README 建出首个提交"}
+    return {"ok": True, "message": f"{owner}/{name} 可用（私有，默认分支 {st['defaultBranch']}）"}
+
+
+def ensure_repo(gh, cfg, state, log=print, create=True):
     """找到/建好私有仓库，并把「匿名可读」当场否掉。
 
     这一步是硬闸：仓库只要是公开可读的，就**拒绝同步**——
     宁可不备份，也不能把商用字体摆到公网上。
     """
-    me = gh.whoami()
-    login = me.get("login") or ""
-    owner = (cfg.get("owner") or login).strip()
-    name = (cfg.get("repoName") or "").strip()
+    login, owner, name = resolve_target(gh, cfg)
+    if not login:
+        raise RuntimeError("令牌无效或没网：拿不到 GitHub 账号（先在设置里点「测试连接」）")
     if not name:
-        raise RuntimeError("还没设置仓库名（设置面板里填）")
+        raise RuntimeError("还没设置仓库名（设置面板里填一个，或从「最近的库」里选）")
 
-    repo = gh.get_repo(owner, name)
-    if repo is None:
+    st = gh.repo_state(owner, name)
+    if not st["exists"]:
+        if not create:
+            raise RuntimeError(f"{owner}/{name} 不存在")
         log(f"仓库 {owner}/{name} 不存在，创建私有仓…")
-        repo = gh.create_private_repo(name, "FontManager 字体库同步（私有）")
-        repo = gh.get_repo(owner, name) or repo
-    if not repo.get("private"):
+        gh.create_private_repo(name, "FontManager 字体库同步（私有，勿设为公开）")
+        st = gh.repo_state(owner, name)
+        if not st["exists"]:
+            raise RuntimeError(f"建仓失败：{owner}/{name} 还是没有（令牌有没有 repo 权限？）")
+    if not st["private"]:
         raise RuntimeError(f"{owner}/{name} 不是私有仓库，已中止（改成私有再来）")
-    if gh.repo_is_anonymous_readable(owner, name):
+    if st["anonymousReadable"]:
         raise RuntimeError(f"{owner}/{name} 匿名可读，已中止（这是最危险的状态，先改私有）")
+
+    branch = st["defaultBranch"] or "main"
+    if st["empty"]:
+        log("仓库还是空的，先放一个 README 建出首个提交…")
+        gh.init_empty_repo(owner, name, branch)
+        st = gh.repo_state(owner, name)
+        branch = st["defaultBranch"] or branch
+
     state["repo"] = f"{owner}/{name}"
-    return owner, name
+    store.remember_repo(owner, name)
+    return owner, name, branch
 
 
 def _ops_record(device_id, entries, removed):
@@ -192,7 +237,7 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, pr
         log("预演结束：以上是本次会打包上传的内容，什么都没传")
         return summary
 
-    owner, name = ensure_repo(gh, cfg, state, log)
+    owner, name, branch = ensure_repo(gh, cfg, state, log)
     release_id, bucket_tag = (None, None)
     entries, done = [], 0
     tmpdir = tempfile.mkdtemp(prefix="font-sync-")
@@ -257,7 +302,7 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, pr
         record = _ops_record(state["deviceId"], entries, [])
         path = f"{OPS_PREFIX}/{state['deviceId']}/{int(time.time()*1000)}.json"
         try:
-            gh.commit_files(owner, name, gh_default_branch(gh, owner, name),
+            gh.commit_files(owner, name, branch,
                             {path: json.dumps(record, ensure_ascii=False, indent=1).encode("utf-8")},
                             f"sync: {len(entries)} families from {state['deviceId']}")
             log(f"已提交记账文件 {path}")
@@ -270,11 +315,6 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, pr
     log(f"本轮结束：上传 {summary['uploaded']} 个族 / {summary['bytes']/1048576:.1f} MB，"
         f"失败 {len(summary['failed'])}，清掉旧 asset {summary['deleted']}")
     return summary
-
-
-def gh_default_branch(gh, owner, name):
-    repo = gh.get_repo(owner, name) or {}
-    return repo.get("default_branch") or "main"
 
 
 def flush_pending_deletes(gh, state, owner, name, log=print):

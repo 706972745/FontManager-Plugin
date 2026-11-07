@@ -133,6 +133,52 @@ class Gh:
         )
         return data
 
+    def repo_state(self, owner, name):
+        """给设置面板用的一份体检：存在与否、是否私有、空仓、默认分支、能否匿名读。"""
+        repo = self.get_repo(owner, name)
+        if repo is None:
+            return {"exists": False, "private": None, "empty": None,
+                    "defaultBranch": "", "anonymousReadable": None}
+        branch = repo.get("default_branch") or "main"
+        return {
+            "exists": True,
+            "private": bool(repo.get("private")),
+            "empty": not self.branch_sha(owner, name, branch),
+            "defaultBranch": branch,
+            "anonymousReadable": self.repo_is_anonymous_readable(owner, name),
+        }
+
+    def branch_sha(self, owner, name, branch):
+        """分支的最新提交；空仓（还没有任何 commit）返回 None。"""
+        try:
+            _, ref = self.request("GET", f"/repos/{owner}/{name}/git/ref/heads/{branch}",
+                                  allow=(200, 404, 409))
+            return ((ref or {}).get("object") or {}).get("sha")
+        except GhError as e:
+            if e.status in (404, 409):
+                return None
+            raise
+
+    def init_empty_repo(self, owner, name, branch="main", readme=None):
+        """空仓库先放一个 README 建出首个提交 —— 否则 Git Data API 没有 base tree 可用。"""
+        body = readme or (
+            "# 字体库同步\n\n"
+            "这个仓库由 FontManager 的「字体库同步」插件使用，用来存放按字族打包的字体 zip。\n\n"
+            "- 内容在 **Releases** 的 `lib-0001`、`lib-0002`… 分桶里，不在 git 历史里；\n"
+            "- `ops/` 下是同步记账（每台机器一个目录）。\n\n"
+            "⚠️ 请保持这个仓库 **私有**。公开会导致字体被公开分发。\n"
+        )
+        import base64 as _b64
+
+        self.request(
+            "PUT", f"/repos/{owner}/{name}/contents/README.md",
+            json_body={"message": "init: font-sync repo",
+                       "content": _b64.b64encode(body.encode("utf-8")).decode("ascii"),
+                       "branch": branch},
+            allow=(201, 200, 422),
+        )
+        return self.branch_sha(owner, name, branch)
+
     def repo_is_anonymous_readable(self, owner, name):
         """匿名能不能读：这是「仓库到底是不是私有」的唯一可信判据。
 
@@ -253,8 +299,13 @@ class Gh:
 
     # ── Git Data API（一次提交写多个文件，天然原子） ─────────────────────
     def commit_files(self, owner, name, branch, files, message, retries=6):
-        """files: {路径: bytes}。force:false 当 CAS：非快进就被拒，重试即可。"""
+        """files: {路径: bytes}。force:false 当 CAS：非快进就被拒，重试即可。
+
+        空仓库（还没有任何提交）会先补一个 README 建出首个提交 ——
+        Git Data API 需要 base tree，空仓直接调用会 404。
+        """
         last = None
+        inited = False
         for attempt in range(retries):
             try:
                 _, ref = self.request("GET", f"/repos/{owner}/{name}/git/ref/heads/{branch}")
@@ -281,6 +332,14 @@ class Gh:
                 return commit["sha"]
             except GhError as e:
                 last = e
+                # 空仓：没有任何提交 → 补 README 建首个提交，然后重来一次
+                if e.status in (404, 409) and not inited:
+                    inited = True
+                    try:
+                        self.init_empty_repo(owner, name, branch)
+                        continue
+                    except Exception:
+                        pass
                 # 409 / 422 = 竞争失败（别人先提交了），重新读 head 再来
                 if e.status in (409, 422, 404):
                     time.sleep(0.4 * (attempt + 1))

@@ -156,51 +156,141 @@ class PlanTests(unittest.TestCase):
 
 
 class StoreTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old = (store.STATE_PATH, store.CONFIG_PATH, store.SECRET_PATH)
+        store.STATE_PATH = os.path.join(self.tmp.name, "state.json")
+        store.CONFIG_PATH = os.path.join(self.tmp.name, "config.json")
+        store.SECRET_PATH = os.path.join(self.tmp.name, "secret.bin")
+        store._reset_cache()
+
+    def tearDown(self):
+        store.STATE_PATH, store.CONFIG_PATH, store.SECRET_PATH = self.old
+        store._reset_cache()
+        self.tmp.cleanup()
+
     def test_state_roundtrip_creates_device_id(self):
-        with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "state.json")
-            old = store.STATE_PATH
-            store.STATE_PATH = path
-            try:
-                st = store.load_state()
-                self.assertTrue(st["deviceId"])
-                st["families"]["A"] = {"hash": "h"}
-                store.save_state(st)
-                again = store.load_state()
-                self.assertEqual(again["families"]["A"]["hash"], "h")
-                self.assertEqual(again["deviceId"], st["deviceId"])
-            finally:
-                store.STATE_PATH = old
+        st = store.load_state()
+        self.assertTrue(st["deviceId"])
+        st["families"]["A"] = {"hash": "h"}
+        store.save_state(st)
+        again = store.load_state()
+        self.assertEqual(again["families"]["A"]["hash"], "h")
+        self.assertEqual(again["deviceId"], st["deviceId"])
 
     def test_config_defaults_merge(self):
-        with tempfile.TemporaryDirectory() as d:
-            old = store.CONFIG_PATH
-            store.CONFIG_PATH = os.path.join(d, "config.json")
-            try:
-                store.save_config({"repoName": "x", "sync": {"deleteAfterDays": 3}})
-                cfg = store.load_config()
-                self.assertEqual(cfg["repoName"], "x")
-                self.assertEqual(cfg["sync"]["deleteAfterDays"], 3)
-                self.assertEqual(cfg["sync"]["excludeCopyright"], ["unknown"],
-                                 "没写的字段要回落到默认值")
-            finally:
-                store.CONFIG_PATH = old
+        store.save_config({"repoName": "x", "sync": {"deleteAfterDays": 3}})
+        cfg = store.load_config()
+        self.assertEqual(cfg["repoName"], "x")
+        self.assertEqual(cfg["sync"]["deleteAfterDays"], 3)
+        self.assertEqual(cfg["sync"]["excludeCopyright"], ["unknown"],
+                         "没写的字段要回落到默认值")
 
     def test_token_is_encrypted_on_disk(self):
-        with tempfile.TemporaryDirectory() as d:
-            old = store.SECRET_PATH
-            store.SECRET_PATH = os.path.join(d, "secret.bin")
-            try:
-                ok = store.save_token("ghp_example_token_for_test_only_000")
-                if not ok:
-                    self.skipTest("这台机器没有 DPAPI")
-                with open(store.SECRET_PATH, "rb") as fh:
-                    raw = fh.read()
-                self.assertTrue(raw.startswith(b"DPAPI1"))
-                self.assertNotIn(b"ghp_example", raw, "明文绝不能落盘")
-                self.assertEqual(store.load_token(), "ghp_example_token_for_test_only_000")
-            finally:
-                store.SECRET_PATH = old
+        ok = store.upsert_account("alice", "ghp_example_token_for_test_only_000")
+        if not ok:
+            self.skipTest("这台机器没有 DPAPI")
+        with open(store.SECRET_PATH, "rb") as fh:
+            raw = fh.read()
+        self.assertTrue(raw.startswith(b"DPAPI1"))
+        self.assertNotIn(b"ghp_example", raw, "明文绝不能落盘")
+        self.assertEqual(store.token_for("alice"), "ghp_example_token_for_test_only_000")
+
+    def test_multiple_accounts_and_switch(self):
+        if not store.upsert_account("alice", "ghp_aaaa"):
+            self.skipTest("这台机器没有 DPAPI")
+        store.upsert_account("bob", "ghp_bbbb")
+        names = [n for n, _ in store.accounts()]
+        self.assertEqual(names, ["alice", "bob"])
+        self.assertEqual(store.current_account()[0], "bob", "新加的账号默认变成当前账号")
+        store.set_current("alice")
+        store._reset_cache()
+        self.assertEqual(store.current_account(), ("alice", "ghp_aaaa"),
+                         "切换账号要落盘")
+        self.assertEqual(store.token_for("bob"), "ghp_bbbb")
+        store.remove_account("alice")
+        self.assertEqual(store.current_account()[0], "bob")
+
+    def test_legacy_single_token_migrates(self):
+        # 老版本：DPAPI 里就是一段裸 token
+        if not store.upsert_account(store.LEGACY_ACCOUNT, "ghp_legacy_token"):
+            self.skipTest("这台机器没有 DPAPI")
+        store._reset_cache()
+        self.assertEqual(store.current_account(), (store.LEGACY_ACCOUNT, "ghp_legacy_token"))
+        # 拿到真名之后迁移，旧的 _legacy 不能留
+        store.upsert_account("carol", "ghp_legacy_token")
+        names = [n for n, _ in store.accounts()]
+        self.assertEqual(names, ["carol"])
+        self.assertEqual(store.current_account(), ("carol", "ghp_legacy_token"))
+
+    def test_configured_needs_account_token_and_repo(self):
+        self.assertFalse(store.configured(), "空配置必须判定为未配置")
+        if not store.upsert_account("alice", "ghp_aaaa"):
+            self.skipTest("这台机器没有 DPAPI")
+        self.assertFalse(store.configured(), "没填仓库名还不算配好")
+        store.save_config({"repoName": "my-fonts"})
+        self.assertTrue(store.configured())
+
+    def test_remember_repo_keeps_recent_first_and_dedupes(self):
+        store.remember_repo("alice", "lib")
+        store.remember_repo("alice", "other")
+        store.remember_repo("alice", "lib")
+        names = [r["name"] for r in store.load_config()["recentRepos"]]
+        self.assertEqual(names, ["lib", "other"])
+
+    def test_mask(self):
+        self.assertEqual(store.mask(""), "(未设置)")
+        self.assertEqual(store.mask("short"), "***")
+        self.assertTrue(store.mask("ghp_abcdefghijklmnop").startswith("ghp_abc"))
+
+
+class FakeRepoGh:
+    """只实现 check_repo 用到的 repo_state。"""
+
+    def __init__(self, state):
+        self._state = state
+
+    def repo_state(self, owner, name):
+        return dict(self._state)
+
+
+class CheckRepoTests(unittest.TestCase):
+    BASE = {"exists": True, "private": True, "empty": False,
+            "defaultBranch": "main", "anonymousReadable": False}
+
+    def run_case(self, **patch):
+        st = dict(self.BASE)
+        st.update(patch)
+        return syncer.check_repo(FakeRepoGh(st), "alice", "fonts")
+
+    def test_ok(self):
+        res = self.run_case()
+        self.assertTrue(res["ok"])
+        self.assertIn("main", res["message"])
+
+    def test_missing_repo_will_be_created(self):
+        res = self.run_case(exists=False, private=None, empty=None, anonymousReadable=None)
+        self.assertTrue(res["ok"])
+        self.assertTrue(res.get("willCreate"))
+
+    def test_public_repo_is_refused(self):
+        res = self.run_case(private=False, anonymousReadable=True)
+        self.assertFalse(res["ok"])
+        self.assertIn("公开", res["message"])
+
+    def test_anonymous_readable_is_refused(self):
+        res = self.run_case(anonymousReadable=True)
+        self.assertFalse(res["ok"])
+        self.assertIn("匿名", res["message"])
+
+    def test_empty_repo_will_be_initialised(self):
+        res = self.run_case(empty=True)
+        self.assertTrue(res["ok"])
+        self.assertTrue(res.get("willInit"))
+
+    def test_blank_fields(self):
+        res = syncer.check_repo(FakeRepoGh(self.BASE), "", "")
+        self.assertFalse(res["ok"])
 
 
 class GhTests(unittest.TestCase):
@@ -208,11 +298,6 @@ class GhTests(unittest.TestCase):
         import gh
         self.assertEqual(gh._error_text(b'{"message":"Not Found"}'), "Not Found")
         self.assertTrue(gh._error_text(b'{"message":"Validation Failed","errors":[{"code":"x"}]}'))
-
-    def test_mask(self):
-        self.assertEqual(store.mask(""), "(未设置)")
-        self.assertEqual(store.mask("short"), "***")
-        self.assertTrue(store.mask("ghp_abcdefghijklmnop").startswith("ghp_abc"))
 
 
 if __name__ == "__main__":
