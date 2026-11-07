@@ -526,6 +526,41 @@ class PanelTests(unittest.TestCase):
         finally:
             panel.stop()
 
+    def test_repo_picker_needs_an_account_first(self):
+        """没账号时，选库接口要明确让人先去存令牌，而不是抛异常。"""
+        import urllib.request
+
+        panel = self.panel_mod.Panel({}).start()
+        base = f"http://127.0.0.1:{panel.port}"
+
+        def call(path, body):
+            req = urllib.request.Request(
+                base + path, data=json.dumps(body).encode("utf-8"),
+                headers={"X-Panel-Key": panel.key, "Content-Type": "application/json"},
+                method="POST")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read())
+
+        try:
+            for path in ("/api/repos", "/api/repo/use", "/api/repo/create"):
+                r = call(path, {"repoName": "x"})
+                self.assertFalse(r["ok"], path)
+                self.assertIn("账号", r["error"], f"{path} 应提示先保存账号")
+        finally:
+            panel.stop()
+
+    def test_html_has_pick_or_create_buttons(self):
+        """选库页必须有「刷新列表 / 用这个库 / 建好并用它」三个按钮。
+
+        用户原话：教程那段看不懂，希望「有个按钮直接在这里建库或选库」。
+        这几个 id 是那个交互的锚点，改名要同步改 JS。
+        """
+        from pathlib import Path
+        html = (Path(HERE) / "panel.html").read_text(encoding="utf-8")
+        for anchor in ('id="repoRefresh"', 'id="repoUse"', 'id="repoCreate"',
+                       'id="repoPick"', 'id="newRepoName"', 'id="currentRepo"'):
+            self.assertIn(anchor, html)
+
     def test_panel_html_ids_are_all_defined(self):
         import re
         from pathlib import Path

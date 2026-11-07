@@ -294,6 +294,37 @@ class _Handler(BaseHTTPRequestHandler):
                                "state": snapshot()})
 
         # ── 仓库 ──────────────────────────────────────────────
+        if path == "/api/repos":
+            login = store.current_account()[0]
+            if not login:
+                return self._json({"ok": False, "error": "先到「账号与令牌」页保存一个账号"})
+            rows = ghmod.Gh(store.token_for(login)).list_repos()
+            repos = [{
+                "fullName": r.get("full_name") or "",
+                "name": r.get("name") or "",
+                "owner": ((r.get("owner") or {}).get("login") or ""),
+                "private": bool(r.get("private")),
+                "updatedAt": r.get("pushed_at") or r.get("updated_at") or "",
+                "empty": int(r.get("size") or 0) == 0,
+            } for r in rows]
+            repos.sort(key=lambda x: (not x["private"], x["fullName"].lower()))
+            return self._json({"ok": True, "login": login, "repos": repos})
+
+        if path == "/api/repo/use":
+            login = store.current_account()[0]
+            if not login:
+                return self._json({"ok": False, "error": "先保存账号"})
+            owner, name = _ensure_target(login, data.get("owner"), data.get("repoName"))
+            if not name:
+                return self._json({"ok": False, "error": "先选一个库"})
+            res = syncer.check_repo(ghmod.Gh(store.token_for(login)), owner, name)
+            if not res["ok"]:
+                return self._json({"ok": False, "message": res["message"]})
+            store.save_config({"owner": owner if owner != login else "",
+                               "repoName": name, "account": login})
+            store.remember_repo(owner, name)
+            return self._json({"ok": True, "message": res["message"], "state": snapshot()})
+
         if path == "/api/repo/check":
             login = store.current_account()[0]
             if not login:
@@ -316,8 +347,11 @@ class _Handler(BaseHTTPRequestHandler):
             client = ghmod.Gh(store.token_for(login))
             client.create_private_repo(name, "FontManager 字体库同步（私有，勿设为公开）")
             res = syncer.check_repo(client, owner, name)
+            if res["ok"]:
+                store.save_config({"owner": owner if owner != login else "",
+                                   "repoName": name, "account": login})
             store.remember_repo(owner, name)
-            return self._json({"ok": res["ok"], "message": "已建私有仓：" + res["message"],
+            return self._json({"ok": res["ok"], "message": "已建好并使用：" + res["message"],
                                "state": snapshot()})
 
         if path == "/api/save":

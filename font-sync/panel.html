@@ -167,6 +167,17 @@
     border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; background: var(--bg);
   }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .pick {
+    border: 1px solid var(--line); border-radius: 11px; padding: 14px 16px;
+    background: var(--bg);
+  }
+  .pick h3 { font-size: 13.5px; margin: 0 0 2px; font-weight: 650; }
+  .pick .row { margin-top: 10px; }
+  select {
+    font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--card); color: var(--ink); max-width: 100%;
+  }
+  .pick input[type=text] { min-width: 0; }
   @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -234,24 +245,59 @@
   <section id="tab-repo">
     <div class="card">
       <h2><span class="num">1</span>选一个库（必须是私有仓库）</h2>
-      <p class="lead">字体只会上传到<b>你自己的私有仓库</b>。公开仓库会被插件直接拒绝——宁可不备份，也不把字体摆到公网。</p>
-      <div class="row">
-        <div style="flex:1 1 200px">
-          <label class="f">所有者（留空 = 当前账号本人）</label>
-          <input type="text" id="owner" placeholder="比如 your-name 或某个组织" spellcheck="false">
+      <p class="lead">字体只会上传到<b>你自己账号下的私有仓库</b>。下面两种做法任选一种，都是一步到位：</p>
+
+      <div class="grid2" style="margin-top:12px">
+        <div class="pick">
+          <h3>用已有的私有库</h3>
+          <p class="sub">点「刷新列表」，从你这个账号能看到的仓库里直接挑一个。</p>
+          <div class="row">
+            <select id="repoPick" style="flex:1 1 100%">
+              <option value="">先点「刷新列表」</option>
+            </select>
+          </div>
+          <div class="row">
+            <button class="act ghost" id="repoRefresh" type="button">刷新列表</button>
+            <button class="act" id="repoUse" type="button">用这个库</button>
+          </div>
+          <div id="pickMsg"></div>
         </div>
-        <div style="flex:1 1 200px">
-          <label class="f">仓库名（不存在会帮你建）</label>
-          <input type="text" id="repoName" placeholder="比如 my-fonts" list="recentList" spellcheck="false">
-          <datalist id="recentList"></datalist>
+
+        <div class="pick">
+          <h3>新建一个私有库</h3>
+          <p class="sub">没有现成的就用这个：插件会建成 private，并直接设为当前库。</p>
+          <div class="row">
+            <input type="text" id="newRepoName" value="fontmanager-fonts" spellcheck="false">
+          </div>
+          <div class="row">
+            <button class="act" id="repoCreate" type="button">建好并用它</button>
+          </div>
+          <div id="newMsg"></div>
         </div>
       </div>
-      <div class="row">
-        <button class="act ghost" id="checkRepo" type="button">检查这个库</button>
-        <button class="act ghost" id="createRepo" type="button">新建私有仓</button>
-        <button class="act" id="saveRepo" type="button">保存</button>
-      </div>
-      <div id="repoMsg"></div>
+
+      <div class="note" id="currentRepo">当前：还没有选库</div>
+
+      <details style="margin-top:12px">
+        <summary>手动填写所有者 / 仓库名（组织库、别人的库、或列表里没有的）</summary>
+        <div class="row">
+          <div style="flex:1 1 200px">
+            <label class="f">所有者（留空 = 当前账号本人）</label>
+            <input type="text" id="owner" placeholder="比如某个组织" spellcheck="false">
+          </div>
+          <div style="flex:1 1 200px">
+            <label class="f">仓库名</label>
+            <input type="text" id="repoName" placeholder="比如 my-fonts" list="recentList" spellcheck="false">
+            <datalist id="recentList"></datalist>
+          </div>
+        </div>
+        <div class="row">
+          <button class="act ghost" id="checkRepo" type="button">检查这个库</button>
+          <button class="act" id="saveRepo" type="button">保存为当前库</button>
+        </div>
+        <div id="repoMsg"></div>
+      </details>
+
       <p class="sub" style="margin-top:10px">换库 = 换远端，<b>首次会全量传一遍</b>；换回原来的库则只传变化的族。</p>
     </div>
 
@@ -356,10 +402,27 @@
           <span class="sub" style="display:block">非中文界面路径：Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic)。</span></li>
         <li><b>存令牌。</b>回到「账号与令牌」页 → 粘贴 → 测试并保存 → 看到「已连接 你的名字」。
           若提示缺 <code>repo</code>，回 GitHub 给这个令牌补勾。</li>
-        <li><b>选库。</b>「同步到哪个库」页 → 仓库名随便起一个（如 <code>my-fonts</code>），所有者留空 →
-          「新建私有仓」（或直接保存，首次同步自动建）。已有库就填好名字点「检查这个库」，看到绿色「可用」再保存。</li>
-        <li><b>预演，然后同步。</b>「预演一次」看要传多少族 / 多少 MB；数字合理就点「立即同步（全部）」。
-          之后改字体，右键那个字族 →「同步这个字族到 GitHub」即可。</li>
+        <li><b>选库 —— 两种做法挑一个，都是一步到位。</b>
+          <ul class="plain">
+            <li><b>已经有私有库</b>：点「刷新列表」→ 在下拉里挑一个 → 点「用这个库」。
+              插件会当场检查它是不是私有、能不能被匿名读到，通过就自动保存成当前库。</li>
+            <li><b>还没有库</b>：点「建好并用它」。名字默认 <code>fontmanager-fonts</code>，想改就改。
+              插件建的是 <b>private</b> 仓库，建完自动设为当前库，不用再去网页上点一遍。</li>
+          </ul>
+          成功的标志：页面中间出现绿色一条「当前库：你的名字/xxx（已就绪）」。
+          要用手上组织的库、或下拉里没列出来的，展开下面的「手动填写所有者 / 仓库名」。
+          <div class="row"><button class="act ghost" data-go="repo" type="button">去选库 / 建库</button></div>
+        </li>
+        <li><b>先预演，再正式传。</b>
+          <ul class="plain">
+            <li>点「预演一次（不传）」：只统计<b>多少族、共多少 MB</b>，不打包、不上传，几秒钟出结果。
+              这些数字就是这次要动的东西，看着合理再往下走。</li>
+            <li>确认没问题 → 「立即同步（全部）」。首次是全量，时间主要看你的<b>上行带宽</b>
+              （整库几个 GB，以小时计；之后只传变化）。</li>
+            <li>以后改了一两款字体：右键那个字族 →「同步这个字族到 GitHub」，只处理它一个。</li>
+          </ul>
+          <div class="row"><button class="act ghost" data-go="repo" type="button">去预演 / 同步</button></div>
+        </li>
       </ol>
     </div>
 
@@ -486,6 +549,10 @@
     history.replaceState(null, '', '?k=' + encodeURIComponent(KEY) + '&tab=' + tab);
   }
   document.querySelectorAll('nav button').forEach((b) => b.onclick = () => show(b.dataset.tab));
+  document.querySelectorAll('[data-go]').forEach((b) => b.onclick = () => {
+    show(b.dataset.go);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
   show(new URLSearchParams(location.search).get('tab') || (location.hash || '').replace('#', '') || 'account');
 
   // ── 渲染 ────────────────────────────────────────────────
@@ -534,6 +601,12 @@
     }
 
     // 仓库
+    const cur = $('currentRepo');
+    cur.className = 'note ' + (st.repoName ? 'ok' : 'warn');
+    cur.innerHTML = st.repoName
+      ? '当前库：<b>' + esc((st.owner || st.login) + '/' + st.repoName) + '</b>' +
+        (st.configured ? '（已就绪）' : '')
+      : '当前还没有选库 —— 上面两种做法任选一种，都是一步到位。';
     $('owner').value = st.owner || '';
     $('repoName').value = st.repoName || '';
     $('recentList').innerHTML = st.recentRepos
@@ -613,6 +686,73 @@
     return { owner: $('owner').value.trim(), repoName: $('repoName').value.trim() };
   }
 
+  function renderRepos(repos) {
+    const sel = $('repoPick');
+    const priv = repos.filter((r) => r.private);
+    const pub = repos.filter((r) => !r.private);
+    sel.innerHTML = '<option value="">— 选一个库（共 ' + priv.length + ' 个私有库）—</option>' +
+      priv.map((r) => {
+        const when = r.updatedAt ? r.updatedAt.slice(0, 10) : '';
+        return '<option value="' + esc(r.fullName) + '">' + esc(r.fullName) +
+          (r.empty ? ' · 空库' : '') + (when ? ' · ' + when : '') + '</option>';
+      }).join('') +
+      (pub.length ? '<optgroup label="公开仓库（不能用，会被拒绝）">' +
+        pub.map((r) => '<option value="' + esc(r.fullName) + '">' + esc(r.fullName) + ' · 公开</option>').join('') +
+        '</optgroup>' : '');
+    msg($('pickMsg'), priv.length
+      ? '读到 ' + priv.length + ' 个私有库。挑一个点「用这个库」即可。'
+      : '这个账号下还没有私有库 —— 用右边「新建一个私有库」。', priv.length ? 'ok' : 'warn');
+  }
+
+  $('repoRefresh').onclick = async () => {
+    if (!STATE || !STATE.login) { msg($('pickMsg'), '先到「账号与令牌」页保存一个账号。', 'bad'); return; }
+    const btn = $('repoRefresh');
+    btn.disabled = true; btn.textContent = '读取中…';
+    msg($('pickMsg'), '正在向 GitHub 要仓库列表…');
+    try {
+      const r = await api('repos', {});
+      if (!r.ok) { msg($('pickMsg'), esc(r.error || '读不到仓库列表'), 'bad'); return; }
+      renderRepos(r.repos || []);
+    } finally {
+      btn.disabled = false; btn.textContent = '刷新列表';
+    }
+  };
+
+  $('repoUse').onclick = async () => {
+    const v = $('repoPick').value;
+    if (!v) { msg($('pickMsg'), '先在下拉里选一个库。', 'bad'); return; }
+    const [owner, name] = v.split('/');
+    const btn = $('repoUse');
+    btn.disabled = true; btn.textContent = '检查中…';
+    try {
+      const r = await api('repo/use', { owner: owner, repoName: name });
+      if (!r.ok) { msg($('pickMsg'), esc((r.message || r.error || '').replace(/\*\*/g, '')), 'bad'); return; }
+      if (r.state) render(r.state);
+      $('owner').value = owner === (STATE && STATE.login) ? '' : owner;
+      $('repoName').value = name;
+      msg($('pickMsg'), '已选：' + esc(v) + '（' + esc((r.message || '').replace(/\*\*/g, '')) + '）', 'ok');
+      msg($('runMsg'), '库已就绪，可以点「预演一次」了。', 'ok');
+    } finally {
+      btn.disabled = false; btn.textContent = '用这个库';
+    }
+  };
+
+  async function createRepo(name, msgEl) {
+    if (!name) { msg(msgEl, '先填一个仓库名。', 'bad'); return; }
+    msg(msgEl, '正在创建私有仓 ' + esc(name) + ' …');
+    const r = await api('repo/create', { repoName: name });
+    msg(msgEl, esc((r.message || r.error || '').replace(/\*\*/g, '')), r.ok ? 'ok' : 'bad');
+    if (r.state) {
+      render(r.state);
+      $('repoName').value = name;
+      $('owner').value = '';
+      if (r.ok) msg($('runMsg'), '库已建好并设为当前库，可以点「预演一次」了。', 'ok');
+    }
+    if (r.ok) $('repoRefresh').click();
+  }
+
+  $('repoCreate').onclick = () => createRepo($('newRepoName').value.trim(), $('newMsg'));
+
   $('checkRepo').onclick = async () => {
     const b = repoBody();
     if (!b.repoName) { msg($('repoMsg'), '先填仓库名。', 'bad'); return; }
@@ -620,15 +760,6 @@
     const r = await api('repo/check', b);
     const text = (r.message || r.error || '').replace(/\*\*/g, '');
     msg($('repoMsg'), esc(text), r.ok ? (r.willCreate ? 'warn' : 'ok') : 'bad');
-  };
-
-  $('createRepo').onclick = async () => {
-    const b = repoBody();
-    if (!b.repoName) { msg($('repoMsg'), '先填仓库名。', 'bad'); return; }
-    msg($('repoMsg'), '正在创建私有仓…');
-    const r = await api('repo/create', b);
-    msg($('repoMsg'), esc((r.message || r.error || '').replace(/\*\*/g, '')), r.ok ? 'ok' : 'bad');
-    if (r.state) render(r.state);
   };
 
   async function saveRepo() {
@@ -640,8 +771,7 @@
       maxFamilyMB: $('maxMB').value,
       deleteAfterDays: $('keepDays').value,
     }));
-    msg($('repoMsg'), r.ok ? '已保存。现在可以去下面「预演一次」。' : esc(r.error || '保存失败'),
-      r.ok ? 'ok' : 'bad');
+    msg($('repoMsg'), r.ok ? '已保存为当前库。' : esc(r.error || '保存失败'), r.ok ? 'ok' : 'bad');
     if (r.state) render(r.state);
     return r.ok;
   }
@@ -649,14 +779,22 @@
   $('saveRules').onclick = saveRepo;
 
   $('dryBtn').onclick = async () => {
-    if (!STATE || !STATE.configured) { msg($('repoMsg'), '先把账号和仓库都保存好。', 'bad'); show('account'); return; }
+    if (!STATE || !STATE.configured) {
+      msg($('runMsg'), '还差一步：先在「账号与令牌」保存令牌，再在上面选好库。', 'bad');
+      show('account');
+      return;
+    }
     const r = await api('dryrun');
     msg($('runMsg'), r.ok ? '预演已开始 —— 数分钟后看 FontManager 的通知。' : esc(r.error), r.ok ? 'ok' : 'bad');
   };
 
   $('syncBtn').onclick = async () => {
-    if (!STATE || !STATE.configured) { msg($('repoMsg'), '先把账号和仓库都保存好。', 'bad'); show('account'); return; }
-    if (!confirm('开始正式同步？会把变化的字族上传到 ' + ($('owner').value || STATE.login) + '/' + $('repoName').value)) return;
+    if (!STATE || !STATE.configured) {
+      msg($('runMsg'), '还差一步：先在「账号与令牌」保存令牌，再在上面选好库。', 'bad');
+      show('account');
+      return;
+    }
+    if (!confirm('开始正式同步？会把变化的字族上传到 ' + ((STATE.owner || STATE.login) + '/' + STATE.repoName))) return;
     const r = await api('sync');
     msg($('runMsg'), r.ok ? '同步已开始 —— 进度看 FontManager 的通知。' : esc(r.error), r.ok ? 'ok' : 'bad');
   };

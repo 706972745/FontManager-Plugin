@@ -124,6 +124,19 @@ class Gh:
                 return None
             raise
 
+    def list_repos(self, per_page=100):
+        """当前账号能看到的仓库（自己 + 协作 + 组织），按最近更新排。
+
+        设置面板「选库」用：直接列出**私有**仓库让用户点，不用手打 owner/name。
+        最多取 100 个 —— 一次设置而已，翻页没意义；没列出来的可以手填。
+        """
+        _, data = self.request(
+            "GET",
+            f"/user/repos?per_page={per_page}&sort=updated"
+            "&affiliation=owner,collaborator,organization_member",
+        )
+        return data or []
+
     def create_private_repo(self, name, description=""):
         _, data = self.request(
             "POST", "/user/repos",
