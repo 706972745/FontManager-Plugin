@@ -518,10 +518,14 @@
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   async function api(path, body) {
+    // 只有读状态用 GET，其余动作一律 POST —— 别用「有没有 body」来猜方法：
+    // 曾经 dryrun / sync 因为没传 body 被发成 GET，后端只在 POST 分支处理，
+    // 于是点了按钮只回一句 unknown endpoint。
+    const read = path === 'state';
     const res = await fetch('/api/' + path, {
-      method: body ? 'POST' : 'GET',
+      method: read ? 'GET' : 'POST',
       headers: { 'X-Panel-Key': KEY, 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
+      body: read ? undefined : JSON.stringify(body === undefined ? {} : body),
     });
     let data = {};
     try { data = await res.json(); } catch (e) { data = { ok: false, error: '响应解析失败（HTTP ' + res.status + '）' }; }
@@ -784,8 +788,8 @@
       show('account');
       return;
     }
-    const r = await api('dryrun');
-    msg($('runMsg'), r.ok ? '预演已开始 —— 数分钟后看 FontManager 的通知。' : esc(r.error), r.ok ? 'ok' : 'bad');
+    const r = await api('dryrun', {});
+    msg($('runMsg'), r.ok ? '预演已开始 —— 数分钟后看 FontManager 的通知。' : esc(r.error || '触发失败'), r.ok ? 'ok' : 'bad');
   };
 
   $('syncBtn').onclick = async () => {
@@ -795,8 +799,8 @@
       return;
     }
     if (!confirm('开始正式同步？会把变化的字族上传到 ' + ((STATE.owner || STATE.login) + '/' + STATE.repoName))) return;
-    const r = await api('sync');
-    msg($('runMsg'), r.ok ? '同步已开始 —— 进度看 FontManager 的通知。' : esc(r.error), r.ok ? 'ok' : 'bad');
+    const r = await api('sync', {});
+    msg($('runMsg'), r.ok ? '同步已开始 —— 进度看 FontManager 的通知。' : esc(r.error || '触发失败'), r.ok ? 'ok' : 'bad');
   };
 
   // ── 体检 ────────────────────────────────────────────────

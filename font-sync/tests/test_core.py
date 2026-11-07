@@ -561,6 +561,62 @@ class PanelTests(unittest.TestCase):
                        'id="repoPick"', 'id="newRepoName"', 'id="currentRepo"'):
             self.assertIn(anchor, html)
 
+    def test_dryrun_and_sync_are_post_only(self):
+        """「预演 / 立即同步」必须是 POST；GET 应当被拒。
+
+        回归用例：前端原来用「有没有 body」决定方法，这两个按钮没传 body，
+        于是被发成 GET，后端 POST 分支根本轮不到 —— 用户看到的就是一句
+        `unknown endpoint`，看着像接口不存在，其实是方法错了。
+        """
+        import urllib.request
+        import urllib.error
+
+        fired = []
+        panel = self.panel_mod.Panel({"dry": lambda: fired.append("dry"),
+                                     "sync": lambda: fired.append("sync")}).start()
+        base = f"http://127.0.0.1:{panel.port}"
+
+        def call(path, method):
+            req = urllib.request.Request(
+                base + path, data=b"{}",
+                headers={"X-Panel-Key": panel.key, "Content-Type": "application/json"},
+                method=method)
+            try:
+                with urllib.request.urlopen(req, timeout=8) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read() or b"{}")
+
+        try:
+            for path in ("/api/dryrun", "/api/sync"):
+                code, body = call(path, "POST")
+                self.assertEqual(code, 200, f"{path} POST 应当成功：{body}")
+                self.assertTrue(body["ok"], body)
+            self.assertEqual(fired, ["dry", "sync"], "两个动作都要真的被调用")
+            code, body = call("/api/dryrun", "GET")
+            self.assertEqual(code, 404, "动作接口不接受 GET")
+            self.assertEqual(body["error"], "unknown endpoint")
+        finally:
+            panel.stop()
+
+    def test_panel_js_sends_body_for_every_action(self):
+        """页面里除 `state` 外的每个 api() 调用都要显式传参数。
+
+        api() 现在按「路径是不是 state」决定 GET/POST，不再靠 body 猜；
+        这条测试盯住调用点，避免有人又把 `api('xxx')` 写回来。
+        """
+        import re
+        from pathlib import Path
+        html = (Path(HERE) / "panel.html").read_text(encoding="utf-8")
+        bad = []
+        for m in re.finditer(r"api\('([^']+)'\s*([,)])", html):
+            name, tail = m.group(1), m.group(2)
+            if name == "state":
+                continue
+            if tail == ")":
+                bad.append(name)
+        self.assertEqual(bad, [], f"这些调用没传参数，可能被发成 GET：{bad}")
+
     def test_panel_html_ids_are_all_defined(self):
         import re
         from pathlib import Path
