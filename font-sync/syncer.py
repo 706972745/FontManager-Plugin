@@ -221,7 +221,18 @@ def ensure_repo(gh, cfg, state, log=print, create=True):
         st = gh.repo_state(owner, name)
         branch = st["defaultBranch"] or branch
 
-    state["repo"] = f"{owner}/{name}"
+    target = f"{owner}/{name}"
+    prev = (state.get("repo") or "").strip()
+    if prev and prev.lower() != target.lower():
+        # 换库防呆：families 里的指纹/assetId 是**旧库**的。留着它们的话，
+        # build_plan 会把每个族都判成「未变化」直接跳过 —— 新库永远是空的，
+        # 日志却显示「跳过 N 个未变化」，看着像成功。所以换库必须清空重来。
+        had = len(state.get("families") or {})
+        log(f"目标库 {prev} → {target}：清掉属于旧库的 {had} 条同步记录，按新库重新全量")
+        state["families"] = {}
+        # 旧库的待删 asset id 在新库里指向别的东西，绝不能带过去
+        state["pendingDeletes"] = []
+    state["repo"] = target
     store.remember_repo(owner, name)
     return owner, name, branch
 

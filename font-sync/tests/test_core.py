@@ -422,6 +422,153 @@ class RemoveSyncTests(unittest.TestCase):
         self.assertIn("Gone", self.state["families"])
 
 
+class FakeEnsureGh:
+    """ensure_repo 只需要这几个方法。"""
+
+    def __init__(self, exists=True, private=True, readable=False, empty=False):
+        self.state = {"exists": exists, "private": private,
+                      "anonymousReadable": readable, "defaultBranch": "main",
+                      "empty": empty}
+        self.created = []
+
+    def whoami(self):
+        return {"login": "me"}
+
+    def repo_state(self, owner, name):
+        return dict(self.state)
+
+    def create_private_repo(self, name, description=""):
+        self.created.append(name)
+        self.state["exists"] = True
+        return {"full_name": f"me/{name}"}
+
+    def init_empty_repo(self, owner, name, branch):
+        self.state["empty"] = False
+
+
+class RepoSwitchTests(unittest.TestCase):
+    """换库防呆：旧库的同步记录必须清掉，否则新库永远是空的。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old = (store.STATE_PATH, store.CONFIG_PATH, store.SECRET_PATH)
+        store.STATE_PATH = os.path.join(self.tmp.name, "state.json")
+        store.CONFIG_PATH = os.path.join(self.tmp.name, "config.json")
+        store.SECRET_PATH = os.path.join(self.tmp.name, "secret.bin")
+        store._reset_cache()
+
+    def tearDown(self):
+        (store.STATE_PATH, store.CONFIG_PATH, store.SECRET_PATH) = self.old
+        store._reset_cache()
+        self.tmp.cleanup()
+
+    def _state(self, repo):
+        return {"repo": repo,
+                "families": {"A": {"fingerprint": "f", "hash": "h", "assetId": 1},
+                             "B": {"fingerprint": "f", "hash": "h", "assetId": 2}},
+                "pendingDeletes": [{"assetId": 9}]}
+
+    def test_switching_repo_clears_records_from_the_old_one(self):
+        st = self._state("me/old")
+        cfg = {"owner": "me", "repoName": "new"}
+        owner, name, branch = syncer.ensure_repo(FakeEnsureGh(), cfg, st, log=lambda *_: None)
+        self.assertEqual(st["repo"], "me/new")
+        self.assertEqual(st["families"], {},
+                         "换库后还留着旧库的指纹，build_plan 会把所有族判成未变化")
+        self.assertEqual(st["pendingDeletes"], [],
+                         "旧库的 asset id 在新库指向别的东西，不能带过去")
+
+    def test_same_repo_keeps_its_records(self):
+        st = self._state("me/same")
+        cfg = {"owner": "me", "repoName": "same"}
+        syncer.ensure_repo(FakeEnsureGh(), cfg, st, log=lambda *_: None)
+        self.assertEqual(len(st["families"]), 2, "同一个库重复同步不该清记录")
+        self.assertEqual(st["pendingDeletes"], [{"assetId": 9}])
+
+    def test_repo_name_is_case_insensitive(self):
+        st = self._state("me/Fonts")
+        cfg = {"owner": "me", "repoName": "fonts"}
+        syncer.ensure_repo(FakeEnsureGh(), cfg, st, log=lambda *_: None)
+        self.assertEqual(len(st["families"]), 2, "只是大小写不同，算同一个库")
+
+    def test_public_repo_is_still_refused(self):
+        st = self._state("")
+        cfg = {"owner": "me", "repoName": "x"}
+        with self.assertRaises(RuntimeError) as ctx:
+            syncer.ensure_repo(FakeEnsureGh(private=False), cfg, st, log=lambda *_: None)
+        self.assertIn("不是私有", str(ctx.exception))
+
+
+class RepoNameTests(unittest.TestCase):
+    """仓库名规则：前后端同一套，后端必须兜底。"""
+
+    def setUp(self):
+        import panel
+        self.panel = panel
+
+    def test_accepts_normal_names(self):
+        for name in ("fontmanager-fonts", "my.fonts_2", "A1", "a" * 100):
+            self.assertEqual(self.panel.repo_name_problem(name), "", name)
+
+    def test_rejects_what_github_rejects(self):
+        bad = {
+            "": "不能空",
+            "我的字体": "中文",
+            "my fonts": "中文和空格",
+            "a/b": "只能用",
+            "a" * 101: "100",
+            ".hidden": "点开头",
+            ".": "点开头",
+        }
+        for name, hint in bad.items():
+            problem = self.panel.repo_name_problem(name)
+            self.assertTrue(problem, f"{name!r} 应该被拒")
+            self.assertIn(hint, problem, f"{name!r} 的提示不对：{problem}")
+
+
+class FamilyCapTests(unittest.TestCase):
+    """单族上限：默认 85 MB（用户 2026-11-07 定的），且只在一个地方定义。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old = (store.STATE_PATH, store.CONFIG_PATH, store.SECRET_PATH)
+        store.STATE_PATH = os.path.join(self.tmp.name, "state.json")
+        store.CONFIG_PATH = os.path.join(self.tmp.name, "config.json")
+        store.SECRET_PATH = os.path.join(self.tmp.name, "secret.bin")
+        store._reset_cache()
+
+    def tearDown(self):
+        (store.STATE_PATH, store.CONFIG_PATH, store.SECRET_PATH) = self.old
+        store._reset_cache()
+        self.tmp.cleanup()
+
+    def test_default_cap_is_85_megabytes(self):
+        self.assertEqual(store.DEFAULT_CONFIG["sync"]["maxFamilyBytes"], 85 * 1024 * 1024,
+                         "默认单族上限应当是 85 MB")
+
+    def test_panel_reports_the_default_when_config_is_empty(self):
+        import panel
+        st = panel.snapshot()
+        self.assertEqual(st["sync"]["maxFamilyMB"], 85,
+                         "没存过配置时，面板要显示 85 而不是 400")
+
+    def test_panel_roundtrips_a_custom_cap(self):
+        import panel
+        n = panel._save_sync_rules({"maxFamilyMB": 120, "deleteAfterDays": 7,
+                                    "excludeUnknown": True, "deleteRemoved": True},
+                                   "owner", "repo")
+        self.assertEqual(n, 120)
+
+    def test_omitted_cap_falls_back_to_default_not_zero(self):
+        import panel
+        panel._save_sync_rules({"maxFamilyMB": "", "deleteAfterDays": 7,
+                                "excludeUnknown": True, "deleteRemoved": True},
+                               "owner", "repo")
+        cfg = store.load_config()
+        self.assertEqual(cfg["sync"]["maxFamilyBytes"], 85 * 1024 * 1024,
+                         "字段空着要回落到默认值，不能变成 1 MB")
+
+
 class StoreLayoutTests(unittest.TestCase):
     """三个状态文件的位置（不碰它们，只检查路径）。"""
 
@@ -598,6 +745,34 @@ class PanelTests(unittest.TestCase):
             self.assertEqual(body["error"], "unknown endpoint")
         finally:
             panel.stop()
+
+    def test_open_dir_reports_a_missing_directory(self):
+        """目录不在了要说清楚，别静默成功 —— 用户只会觉得「点了没用」。"""
+        import urllib.request
+
+        panel = self.panel_mod.Panel({}).start()
+        old_dir = store.PLUGIN_DIR
+        store.PLUGIN_DIR = os.path.join(self.tmp.name, "nope")
+        try:
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{panel.port}/api/open_dir", data=b"{}",
+                headers={"X-Panel-Key": panel.key, "Content-Type": "application/json"},
+                method="POST")
+            with urllib.request.urlopen(req, timeout=8) as r:
+                body = json.loads(r.read())
+            self.assertFalse(body["ok"])
+            self.assertIn("目录不存在", body["error"])
+            self.assertTrue(body["path"].endswith("nope"))
+        finally:
+            store.PLUGIN_DIR = old_dir
+            panel.stop()
+
+    def test_advanced_page_offers_copy_path(self):
+        """打开目录可能被系统策略挡住，「复制路径」是保底通道，不能没有。"""
+        from pathlib import Path
+        html = (Path(HERE) / "panel.html").read_text(encoding="utf-8")
+        for anchor in ('id="openDir"', 'id="copyDir"', "navigator.clipboard"):
+            self.assertIn(anchor, html)
 
     def test_panel_js_sends_body_for_every_action(self):
         """页面里除 `state` 外的每个 api() 调用都要显式传参数。

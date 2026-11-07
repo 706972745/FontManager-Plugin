@@ -1,7 +1,7 @@
 {
   "id": "com.fontmanager.font-sync",
   "name": "字体库同步（GitHub）",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "apiLevel": 1,
   "entry": "main.py",
   "interpreter": "python",

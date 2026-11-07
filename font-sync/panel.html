@@ -321,7 +321,7 @@
       <div class="row">
         <div>
           <label class="f">单族上限（MB）</label>
-          <input type="number" id="maxMB" min="8" step="10" style="min-width:120px;flex:0 0 120px">
+          <input type="number" id="maxMB" min="8" step="5" value="85" style="min-width:120px;flex:0 0 120px">
         </div>
         <div>
           <label class="f">旧版本保留（天）</label>
@@ -494,9 +494,12 @@
       </table>
       <div class="row">
         <button class="act ghost" id="openDir" type="button">打开插件目录</button>
+        <button class="act ghost" id="copyDir" type="button">复制路径</button>
         <button class="act danger" id="resetBtn" type="button">清空本机配置与令牌</button>
       </div>
       <div id="advMsg"></div>
+      <p class="sub">资源管理器没弹出来？路径在上面的「插件目录」里，用「复制路径」粘到地址栏也一样。
+        面板服务随 FontManager 关闭而退出，重新打开面板即可。</p>
       <p class="sub">「清空」只删本机的 <code>config.json / secret.bin / state.json</code>，
         不删也不改 GitHub 上的仓库与字体包。</p>
     </div>
@@ -522,11 +525,19 @@
     // 曾经 dryrun / sync 因为没传 body 被发成 GET，后端只在 POST 分支处理，
     // 于是点了按钮只回一句 unknown endpoint。
     const read = path === 'state';
-    const res = await fetch('/api/' + path, {
-      method: read ? 'GET' : 'POST',
-      headers: { 'X-Panel-Key': KEY, 'Content-Type': 'application/json' },
-      body: read ? undefined : JSON.stringify(body === undefined ? {} : body),
-    });
+    let res;
+    try {
+      res = await fetch('/api/' + path, {
+        method: read ? 'GET' : 'POST',
+        headers: { 'X-Panel-Key': KEY, 'Content-Type': 'application/json' },
+        body: read ? undefined : JSON.stringify(body === undefined ? {} : body),
+      });
+    } catch (e) {
+      // 面板服务和插件进程同生共死。软件关掉后这个页面还开着，任何按钮都会
+      // 静默失败 —— 必须说清楚，否则用户只会觉得「点了没用」。
+      return { ok: false, error: '连不上面板服务（插件已退出或软件已关闭）。'
+        + '回 FontManager 重新打开「设置 GitHub 库…」即可。' };
+    }
     let data = {};
     try { data = await res.json(); } catch (e) { data = { ok: false, error: '响应解析失败（HTTP ' + res.status + '）' }; }
     return data;
@@ -607,10 +618,14 @@
     // 仓库
     const cur = $('currentRepo');
     cur.className = 'note ' + (st.repoName ? 'ok' : 'warn');
+    const synced = st.syncedFamilies
+      ? ' · 已同步 ' + st.syncedFamilies + ' 个族'
+      : ' · 还没同步过';
     cur.innerHTML = st.repoName
       ? '当前库：<b>' + esc((st.owner || st.login) + '/' + st.repoName) + '</b>' +
-        (st.configured ? '（已就绪）' : '')
+        (st.configured ? '（已就绪' + synced + '）' : '（还差令牌）')
       : '当前还没有选库 —— 上面两种做法任选一种，都是一步到位。';
+    refreshCreateState();
     $('owner').value = st.owner || '';
     $('repoName').value = st.repoName || '';
     $('recentList').innerHTML = st.recentRepos
@@ -706,6 +721,11 @@
     msg($('pickMsg'), priv.length
       ? '读到 ' + priv.length + ' 个私有库。挑一个点「用这个库」即可。'
       : '这个账号下还没有私有库 —— 用右边「新建一个私有库」。', priv.length ? 'ok' : 'warn');
+    // 防呆：当前库如果在列表里，直接选中它，让人一眼看到「我现在用哪个」
+    if (STATE && STATE.repoName) {
+      const cur = ((STATE.owner || STATE.login) + '/' + STATE.repoName);
+      if (priv.some((r) => r.fullName === cur)) sel.value = cur;
+    }
   }
 
   $('repoRefresh').onclick = async () => {
@@ -724,8 +744,21 @@
 
   $('repoUse').onclick = async () => {
     const v = $('repoPick').value;
-    if (!v) { msg($('pickMsg'), '先在下拉里选一个库。', 'bad'); return; }
+    if (!v) { msg($('pickMsg'), '先在下拉里选一个库（还没拉过列表就点左边的「刷新列表」）。', 'bad'); return; }
     const [owner, name] = v.split('/');
+    if (isCurrentRepo(owner, name)) {
+      msg($('pickMsg'), '这就是当前库，不用再选一次。', 'ok');
+      return;
+    }
+    if (STATE && STATE.syncedFamilies > 0) {
+      const cur = (STATE.owner || STATE.login) + '/' + STATE.repoName;
+      const ok = confirm('换成 ' + v + ' ？\n\n'
+        + '· 本机记着 ' + STATE.syncedFamilies + ' 个族是「已同步到 ' + cur + '」的，换库会清掉这些记录，\n'
+        + '  然后按新库重新全量上传一遍（不是增量）。\n'
+        + '· 旧库 ' + cur + ' 里的备份不会被删，会原样留着。\n\n'
+        + '确定要换吗？');
+      if (!ok) return;
+    }
     const btn = $('repoUse');
     btn.disabled = true; btn.textContent = '检查中…';
     try {
@@ -754,6 +787,46 @@
     }
     if (r.ok) $('repoRefresh').click();
   }
+
+  // 名字合法性与「是不是当前库」实时判断 —— 别等点下去才报 422
+  const NAME_RE = /^[A-Za-z0-9._-]{1,100}$/;
+
+  function nameProblem(n) {
+    n = (n || '').trim();
+    if (!n) return '先起个名字';
+    if (n.length > 100) return '最长 100 个字符';
+    if (!NAME_RE.test(n)) return '只能用英文字母、数字、点、下划线、连字符（中文和空格不行）';
+    if (n.startsWith('.')) return '不能以点开头';
+    if (n === '.' || n === '..') return '不能用 . 或 .. 当仓库名';
+    return '';
+  }
+
+  function isCurrentRepo(owner, name) {
+    if (!STATE || !STATE.repoName || !name) return false;
+    const curOwner = String(STATE.owner || STATE.login || '').toLowerCase();
+    return String(name).toLowerCase() === String(STATE.repoName).toLowerCase() &&
+      (!owner || String(owner).toLowerCase() === curOwner);
+  }
+
+  function refreshCreateState() {
+    const btn = $('repoCreate');
+    const name = $('newRepoName').value.trim();
+    const problem = nameProblem(name);
+    if (problem) {
+      msg($('newMsg'), '名字有问题：' + problem, 'bad');
+      btn.disabled = true; btn.textContent = '建好并用它';
+      return;
+    }
+    if (isCurrentRepo('', name)) {
+      msg($('newMsg'), '这已经是你的当前库了 —— 不用新建，直接到下面「预演一次」就行。', 'ok');
+      btn.disabled = true; btn.textContent = '已是当前库';
+      return;
+    }
+    msg($('newMsg'), '');
+    btn.disabled = false; btn.textContent = '建好并用它';
+  }
+
+  $('newRepoName').addEventListener('input', refreshCreateState);
 
   $('repoCreate').onclick = () => createRepo($('newRepoName').value.trim(), $('newMsg'));
 
@@ -825,7 +898,35 @@
   };
 
   // ── 高级 ────────────────────────────────────────────────
-  $('openDir').onclick = () => api('open_dir', {});
+  $('openDir').onclick = async () => {
+    const btn = $('openDir');
+    msg($('advMsg'), '正在打开…');
+    btn.disabled = true;
+    try {
+      const r = await api('open_dir', {});
+      if (r.ok) {
+        msg($('advMsg'), '已打开：<code>' + esc(r.path || '') + '</code>' +
+          '　没看到窗口就在任务栏找一下资源管理器，它可能被 FontManager 挡在后面。', 'ok');
+      } else {
+        msg($('advMsg'), esc(r.error || '打不开（原因未知）') +
+          '　可以点「复制路径」粘到资源管理器地址栏。', 'bad');
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  $('copyDir').onclick = async () => {
+    const path = (STATE && STATE.pluginDir) || '';
+    if (!path) { msg($('advMsg'), '还拿不到插件目录。', 'bad'); return; }
+    try {
+      await navigator.clipboard.writeText(path);
+      msg($('advMsg'), '路径已复制：<code>' + esc(path) + '</code>', 'ok');
+    } catch (e) {
+      // 浏览器不给剪贴板权限时，退回到「选中让你自己 Ctrl+C」
+      msg($('advMsg'), '复制被浏览器拦了 —— 路径：<code>' + esc(path) + '</code>', 'warn');
+    }
+  };
   $('resetBtn').onclick = async () => {
     if (!confirm('清空本机的账号令牌与同步设置？（不动 GitHub 上的仓库和字体包）')) return;
     const r = await api('reset', {});

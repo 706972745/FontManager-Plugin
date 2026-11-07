@@ -15,6 +15,7 @@
 
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -56,6 +57,37 @@ NOT_NEEDED = [
 
 
 # ── 数据快照（只给页面看，不含令牌原文） ────────────────────────────────
+def _save_sync_rules(data, owner="", name=""):
+    """把界面上的「同步规则」写进 config.json，返回生效的单族上限（MB）。
+
+    上限的唯一默认值在 `store.DEFAULT_CONFIG`，这里不再写死数字 ——
+    以前 400 散在三处（store / snapshot / save），改一处忘一处就会出现
+    「输入框显示 400，实际按 85 跑」这种对不上的情况。
+    """
+    default_mb = store.DEFAULT_CONFIG["sync"]["maxFamilyBytes"] // 1048576
+    try:
+        max_mb = max(1, int(float(data.get("maxFamilyMB") or default_mb)))
+    except (TypeError, ValueError):
+        max_mb = default_mb
+    try:
+        days = max(0, int(float(data.get("deleteAfterDays") or 7)))
+    except (TypeError, ValueError):
+        days = 7
+    exclude = ["unknown"] if data.get("excludeUnknown", True) else []
+    patch = {
+        "owner": owner, "repoName": name,
+        "account": store.current_account()[0],
+        "sync": {"excludeCopyright": exclude,
+                 "maxFamilyBytes": max_mb * 1024 * 1024,
+                 "deleteAfterDays": days,
+                 "deleteRemovedFamilies": bool(data.get("deleteRemoved", True))},
+    }
+    store.save_config(patch)
+    if name:
+        store.remember_repo(owner or store.current_account()[0], name)
+    return max_mb
+
+
 def snapshot():
     cfg = store.load_config()
     login, token = store.current_account()
@@ -80,7 +112,8 @@ def snapshot():
         "sync": {
             "excludeUnknown": "unknown" in {str(x).lower()
                                             for x in (sync_cfg.get("excludeCopyright") or [])},
-            "maxFamilyMB": max(1, int(int(sync_cfg.get("maxFamilyBytes") or 0) / 1048576) or 400),
+            "maxFamilyMB": max(1, int(int(sync_cfg.get("maxFamilyBytes")
+                                       or store.DEFAULT_CONFIG["sync"]["maxFamilyBytes"]) / 1048576)),
             "deleteAfterDays": int(sync_cfg.get("deleteAfterDays") or 7),
             "deleteRemoved": bool(sync_cfg.get("deleteRemovedFamilies", True)),
         },
@@ -158,6 +191,29 @@ def capabilities(login, owner="", name=""):
 
     failed = [i for i in items if i["ok"] is False]
     return {"ok": not failed, "items": items, "flags": flags, "login": login}
+
+
+REPO_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+
+
+def repo_name_problem(name):
+    """GitHub 的仓库名规则，提前拦住比让它回 422 好懂。
+
+    返回人类可读的问题；没问题返回空串。前端也照这套规则实时提示，
+    但后端必须再验一遍 —— 手填/脚本调用绕得过界面。
+    """
+    n = (name or "").strip()
+    if not n:
+        return "仓库名不能空"
+    if len(n) > 100:
+        return "仓库名最长 100 个字符"
+    if not REPO_NAME_RE.match(n):
+        return "只能用英文字母、数字、点、下划线、连字符（中文和空格不行）"
+    if n.startswith("."):
+        return "不能以点开头"
+    if n in (".", ".."):
+        return "不能用 . 或 .. 当仓库名"
+    return ""
 
 
 def _ensure_target(login, owner, name):
@@ -330,8 +386,9 @@ class _Handler(BaseHTTPRequestHandler):
             if not login:
                 return self._json({"ok": False, "error": "先到「账号与令牌」页保存一个账号"})
             owner, name = _ensure_target(login, data.get("owner"), data.get("repoName"))
-            if not name:
-                return self._json({"ok": False, "error": "先填仓库名"})
+            problem = repo_name_problem(name)
+            if problem:
+                return self._json({"ok": False, "error": problem})
             res = syncer.check_repo(ghmod.Gh(store.token_for(login)), owner, name)
             return self._json({"ok": res["ok"], "message": res["message"],
                                "willCreate": bool(res.get("willCreate")),
@@ -344,40 +401,39 @@ class _Handler(BaseHTTPRequestHandler):
             owner, name = _ensure_target(login, data.get("owner"), data.get("repoName"))
             if not name:
                 return self._json({"ok": False, "error": "先填仓库名"})
+            problem = repo_name_problem(name)
+            if problem:
+                return self._json({"ok": False, "error": problem})
+            if owner.lower() != login.lower():
+                # /user/repos 只能建在自己名下，硬建会悄悄建到个人账号里去
+                return self._json({"ok": False, "error":
+                                   f"新建只能建在你自己的账号下；{owner} 是组织，"
+                                   f"先让管理员把库建好，再展开「手动填写」填它"})
             client = ghmod.Gh(store.token_for(login))
-            client.create_private_repo(name, "FontManager 字体库同步（私有，勿设为公开）")
-            res = syncer.check_repo(client, owner, name)
+            st = client.repo_state(owner, name)
+            existed = bool(st.get("exists"))
+            if existed:
+                # 防呆：名字撞了不该是红字报错，直接切过去更符合用户意图
+                res = syncer.check_repo(client, owner, name)
+                message = "这个库已经存在，已直接设为当前库：" + res["message"]
+            else:
+                client.create_private_repo(name, "FontManager 字体库同步（私有，勿设为公开）")
+                res = syncer.check_repo(client, owner, name)
+                message = "已建好并使用：" + res["message"]
             if res["ok"]:
                 store.save_config({"owner": owner if owner != login else "",
                                    "repoName": name, "account": login})
             store.remember_repo(owner, name)
-            return self._json({"ok": res["ok"], "message": "已建好并使用：" + res["message"],
+            return self._json({"ok": res["ok"], "existed": existed, "message": message,
                                "state": snapshot()})
 
         if path == "/api/save":
             name = str(data.get("repoName") or "").strip()
-            if not name:
-                return self._json({"ok": False, "error": "仓库名不能空"})
+            problem = repo_name_problem(name)
+            if problem:
+                return self._json({"ok": False, "error": problem})
             owner = str(data.get("owner") or "").strip()
-            try:
-                max_mb = max(1, int(float(data.get("maxFamilyMB") or 400)))
-            except Exception:
-                max_mb = 400
-            try:
-                days = max(0, int(float(data.get("deleteAfterDays") or 7)))
-            except Exception:
-                days = 7
-            exclude = ["unknown"] if data.get("excludeUnknown", True) else []
-            patch = {
-                "owner": owner, "repoName": name,
-                "account": store.current_account()[0],
-                "sync": {"excludeCopyright": exclude,
-                         "maxFamilyBytes": max_mb * 1024 * 1024,
-                         "deleteAfterDays": days,
-                         "deleteRemovedFamilies": bool(data.get("deleteRemoved", True))},
-            }
-            store.save_config(patch)
-            store.remember_repo(owner or store.current_account()[0], name)
+            _save_sync_rules(data, owner, name)
             return self._json({"ok": True, "message": "已保存", "state": snapshot()})
 
         # ── 动作（交给主程序界面的通知去反馈进度） ─────────────
@@ -397,11 +453,24 @@ class _Handler(BaseHTTPRequestHandler):
 
         # ── 杂项 ──────────────────────────────────────────────
         if path == "/api/open_dir":
+            target = store.PLUGIN_DIR
+            if not os.path.isdir(target):
+                return self._json({"ok": False, "error": f"目录不存在：{target}",
+                                   "path": target})
+            first = ""
             try:
-                os.startfile(store.PLUGIN_DIR)
-                return self._json({"ok": True})
+                os.startfile(target)  # 交给 shell，等于在资源管理器里双击
+                return self._json({"ok": True, "path": target})
             except Exception as e:
-                return self._json({"ok": False, "error": str(e)})
+                first = str(e)
+            # 兜底：有的环境里 ShellExecute 被策略挡住，直接拉资源管理器
+            try:
+                import subprocess
+                subprocess.Popen(["explorer.exe", target], close_fds=True)
+                return self._json({"ok": True, "path": target, "via": "explorer"})
+            except Exception as e:
+                return self._json({"ok": False, "path": target,
+                                   "error": f"打开失败：{first}；改用资源管理器也失败：{e}"})
 
         if path == "/api/reset":
             store.save_vault({"version": 1, "current": "", "accounts": {}})
