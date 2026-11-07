@@ -138,6 +138,12 @@ def build_plan(api, cfg, state, only_family=None, log=print):
             continue
         todo.append({"family": family, "paths": paths, "bytes": total, "fingerprint": fp})
 
+    # 上次同步过、这次本地已经没有的族（只在整个库全量扫的时候算；
+    # 单族同步不知道「别的族还在不在」，绝不能拿它推断删除）
+    skipped["localFamilies"] = len(groups)
+    skipped["gone"] = (sorted(f for f in known if f not in groups)
+                       if only_family is None else [])
+
     todo.sort(key=lambda e: e["bytes"])
     log(f"计划：{len(todo)} 个族要打包（共 {sum(e['bytes'] for e in todo)/1048576:.1f} MB），"
         f"跳过 {skipped['unchanged']} 个未变化")
@@ -220,6 +226,22 @@ def ensure_repo(gh, cfg, state, log=print, create=True):
     return owner, name, branch
 
 
+def _safe_to_remove(local_families, known_families, gone):
+    """批量删除前的保险丝。
+
+    最怕的场景：主程序正在扫描 / 库没挂上，本地清单只回来一小部分，
+    这时「其他族都不见了」会被当成用户删除，一口气把远端全删了。
+    所以：上次记过 20 个以上、而这次本地只读到不足一半时，这一轮不删。
+    返回 (能不能删, 原因)。
+    """
+    if not gone:
+        return True, ""
+    if known_families >= 20 and local_families < known_families * 0.5:
+        return False, (f"本地只读到 {local_families} 个族，上次同步过 {known_families} 个 —— "
+                       f"像是扫描没跑完或字体库没挂上，这轮不删任何远端内容")
+    return True, ""
+
+
 def _ops_record(device_id, entries, removed):
     return {
         "device": device_id,
@@ -241,11 +263,30 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, pr
 
     todo, skipped = build_plan(api, cfg, state, only_family, log)
     summary = {"planned": len(todo), "uploaded": 0, "failed": [], "deleted": 0,
-               "skipped": skipped, "bytes": 0}
+               "removed": [], "skipped": skipped, "bytes": 0}
+    gone = list(skipped.get("gone") or [])
+    delete_removed = bool(sync_cfg.get("deleteRemovedFamilies", True))
+    if gone:
+        if not delete_removed:
+            log(f"本地少了 {len(gone)} 个族，但设置里关掉了「同步删除」，远端保持不动")
+            gone = []
+        else:
+            ok, why = _safe_to_remove(skipped.get("localFamilies") or 0,
+                                      len(state.get("families") or {}), gone)
+            if not ok:
+                log(f"⚠️ 跳过删除：{why}")
+                gone = []
+            else:
+                log(f"本地少了 {len(gone)} 个族，本轮会一并删掉远端备份（可在设置里关掉）")
     if dry_run:
-        state["lastPlan"] = {"at": int(time.time()), "families":
-                             [{"family": e["family"], "bytes": e["bytes"]} for e in todo]}
+        state["lastPlan"] = {"at": int(time.time()),
+                             "families": [{"family": e["family"], "bytes": e["bytes"]}
+                                          for e in todo],
+                             "removed": gone}
         store.save_state(state)
+        if gone:
+            log("预演：以下族在本地已删除，正式同步时远端备份也会删掉 —— "
+                + "、".join(gone[:10]) + ("" if len(gone) <= 10 else f" 等 {len(gone)} 个"))
         log("预演结束：以上是本次会打包上传的内容，什么都没传")
         return summary
 
@@ -310,13 +351,31 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, pr
         except OSError:
             pass
 
-    if entries:
-        record = _ops_record(state["deviceId"], entries, [])
+    for family in gone:
+        info = state["families"].get(family) or {}
+        asset_id = info.get("assetId")
+        if not asset_id:
+            # 只有记账没有 asset（上次传失败或旧格式），本地记录清掉即可
+            state["families"].pop(family, None)
+            summary["removed"].append({"family": family, "asset": "", "hash": ""})
+            continue
+        try:
+            gh.delete_asset(owner, name, asset_id)
+            state["families"].pop(family, None)
+            summary["removed"].append({"family": family, "asset": info.get("asset") or "",
+                                       "hash": info.get("hash") or ""})
+            log(f"  − 远端已删（本地不存在了）：{family}")
+        except Exception as e:
+            log(f"  ✗ 删除远端 {family} 失败（下一轮再试）：{e}")
+
+    if entries or summary["removed"]:
+        record = _ops_record(state["deviceId"], entries, summary["removed"])
         path = f"{OPS_PREFIX}/{state['deviceId']}/{int(time.time()*1000)}.json"
         try:
             gh.commit_files(owner, name, branch,
                             {path: json.dumps(record, ensure_ascii=False, indent=1).encode("utf-8")},
-                            f"sync: {len(entries)} families from {state['deviceId']}")
+                            f"sync: {len(entries)} families, -{len(summary['removed'])} "
+                            f"from {state['deviceId']}")
             log(f"已提交记账文件 {path}")
         except Exception as e:
             log(f"记账提交失败（不影响 asset，下次会重记）：{e}")
@@ -325,7 +384,8 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, pr
     state["lastSyncAt"] = int(time.time() * 1000)
     store.save_state(state)
     log(f"本轮结束：上传 {summary['uploaded']} 个族 / {summary['bytes']/1048576:.1f} MB，"
-        f"失败 {len(summary['failed'])}，清掉旧 asset {summary['deleted']}")
+        f"删除远端 {len(summary['removed'])} 个族，失败 {len(summary['failed'])}，"
+        f"清掉旧 asset {summary['deleted']}")
     return summary
 
 

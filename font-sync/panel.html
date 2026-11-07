@@ -264,6 +264,14 @@
             <span class="sub" style="display:block">判不清授权的字体不上云，是给账号留退路。</span></span>
         </label>
       </div>
+      <div class="row" style="align-items:flex-start">
+        <label style="display:flex;gap:8px;align-items:flex-start;flex:1 1 100%">
+          <input type="checkbox" id="deleteRemoved" checked style="margin-top:4px">
+          <span>本地删掉字族时，<b>同时删除 GitHub 上的备份</b>（默认开）
+            <span class="sub" style="display:block">关掉就变成「只增不减」的归档。
+              删除只发生在<b>全量同步</b>时，并且有保险丝：一次少了一半以上的族会被当成扫描异常，这一轮不删。</span></span>
+        </label>
+      </div>
       <div class="row">
         <div>
           <label class="f">单族上限（MB）</label>
@@ -531,6 +539,7 @@
     $('recentList').innerHTML = st.recentRepos
       .map((r) => '<option value="' + esc(r.name) + '">' + esc((r.owner || '自己') + '/' + r.name) + '</option>').join('');
     $('excludeUnknown').checked = !!st.sync.excludeUnknown;
+    $('deleteRemoved').checked = st.sync.deleteRemoved !== false;
     $('maxMB').value = st.sync.maxFamilyMB;
     $('keepDays').value = st.sync.deleteAfterDays;
 
@@ -627,6 +636,7 @@
     if (!b.repoName) { msg($('repoMsg'), '仓库名不能空。', 'bad'); return false; }
     const r = await api('save', Object.assign(b, {
       excludeUnknown: $('excludeUnknown').checked,
+      deleteRemoved: $('deleteRemoved').checked,
       maxFamilyMB: $('maxMB').value,
       deleteAfterDays: $('keepDays').value,
     }));

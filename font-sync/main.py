@@ -112,6 +112,8 @@ def do_sync(only_family=None, dry_run=False):
             toast(f"预演完成：{summary['planned']} 个族待传，未上传任何内容")
         else:
             msg = f"同步完成：上传 {summary['uploaded']} 个族（{summary['bytes']/1048576:.1f} MB）"
+            if summary.get("removed"):
+                msg += f"，删除远端 {len(summary['removed'])} 个族"
             if summary["failed"]:
                 msg += f"，{len(summary['failed'])} 个失败"
             toast(msg)

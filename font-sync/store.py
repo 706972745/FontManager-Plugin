@@ -49,6 +49,9 @@ DEFAULT_CONFIG = {
         "maxFamilyBytes": 400 * 1024 * 1024,
         # 旧 asset 延迟删除的天数（给「另一台机器用旧版覆盖新版」留反悔窗口）
         "deleteAfterDays": 7,
+        # 本地删掉某个字族时，远端那份要不要跟着删（默认删 —— 备份应该和库一致）。
+        # 关掉它，远端就变成「只增不减」的归档。
+        "deleteRemovedFamilies": True,
         "batchFamilies": 100,
     },
 }

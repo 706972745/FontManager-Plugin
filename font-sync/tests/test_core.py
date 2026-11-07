@@ -300,6 +300,128 @@ class GhTests(unittest.TestCase):
         self.assertTrue(gh._error_text(b'{"message":"Validation Failed","errors":[{"code":"x"}]}'))
 
 
+class RemovedFamilyTests(unittest.TestCase):
+    """本地删掉字族 → 远端跟着删（默认开，可关）。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        d = self.tmp.name
+        self.files = make_tree(d, {"a/A.ttf": 1024, "b/B.ttf": 1024})
+        self.faces = [
+            {"path": self.files["a/A.ttf"], "family": "Alpha", "copyrightClass": "free"},
+            {"path": self.files["b/B.ttf"], "family": "Beta", "copyrightClass": "free"},
+        ]
+        self.cfg = {"sync": {"excludeCopyright": [], "maxFamilyBytes": 10 << 20}}
+        self.state = {"families": {"Gone": {"assetId": 999, "asset": "Gone__x.zip",
+                                            "hash": "h"}}, "pendingDeletes": []}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_gone_family_is_detected_on_full_sync(self):
+        todo, skipped = syncer.build_plan(FakeApi(self.faces), self.cfg, self.state,
+                                          log=lambda *_: None)
+        self.assertEqual(skipped["gone"], ["Gone"], "上次同步过、本地没有了的族要报出来")
+        self.assertEqual([x["family"] for x in todo], ["Alpha", "Beta"])
+
+    def test_single_family_sync_never_infers_deletion(self):
+        _, skipped = syncer.build_plan(FakeApi(self.faces), self.cfg, self.state,
+                                       only_family="Alpha", log=lambda *_: None)
+        self.assertEqual(skipped["gone"], [],
+                         "单族同步只知道这一个族，不能推断别的族被删了")
+
+    def test_default_keeps_deleting(self):
+        import store
+        self.assertTrue(store.DEFAULT_CONFIG["sync"]["deleteRemovedFamilies"],
+                        "默认应该跟着删（备份要和库一致）")
+
+    def test_guard_stops_mass_deletion(self):
+        ok, why = syncer._safe_to_remove(3, 100, ["x"] * 97)
+        self.assertFalse(ok, "本地只读到 3 个族却要删 97 个，必须拦下来")
+        self.assertIn("扫描", why)
+
+    def test_guard_allows_normal_case(self):
+        self.assertTrue(syncer._safe_to_remove(95, 100, ["x"] * 5)[0], "正常删几个要放行")
+        self.assertTrue(syncer._safe_to_remove(2, 5, ["x"])[0], "小库不做比例判断")
+        self.assertTrue(syncer._safe_to_remove(0, 0, [])[0], "没有要删的直接放行")
+
+
+class FakeSyncGh:
+    """只实现 run_sync 会用到的那几个方法。"""
+
+    def __init__(self):
+        self.deleted, self.commits, self.uploads = [], [], []
+
+    def find_or_create_bucket(self, owner, name):
+        return 1, "lib-0001"
+
+    def upload_asset(self, owner, name, release_id, asset, blob):
+        self.uploads.append(asset)
+        return {"id": 1000 + len(self.uploads)}
+
+    def delete_asset(self, owner, name, asset_id):
+        self.deleted.append(asset_id)
+
+    def commit_files(self, owner, name, branch, files, message, retries=6):
+        self.commits.append((dict(files), message))
+
+
+class RemoveSyncTests(unittest.TestCase):
+    """跑一遍 run_sync，确认「本地没了」的族真的被从远端删掉、记账也写进去。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.files = make_tree(self.tmp.name, {"a/A.ttf": 1024, "b/B.ttf": 1024})
+        self.api = FakeApi([
+            {"path": self.files["a/A.ttf"], "family": "Alpha", "copyrightClass": "free"},
+            {"path": self.files["b/B.ttf"], "family": "Beta", "copyrightClass": "free"},
+        ])
+        self.cfg = {"sync": {"excludeCopyright": [], "maxFamilyBytes": 10 << 20,
+                             "deleteRemovedFamilies": True, "deleteAfterDays": 7}}
+        self.state = {"deviceId": "dev", "families": {}, "pendingDeletes": [],
+                      "lastSyncAt": 0}
+        self.old_state_path = store.STATE_PATH
+        store.STATE_PATH = os.path.join(self.tmp.name, "state.json")
+        self.old_ensure = syncer.ensure_repo
+        syncer.ensure_repo = lambda *a, **k: ("owner", "repo", "main")
+
+    def tearDown(self):
+        syncer.ensure_repo = self.old_ensure
+        store.STATE_PATH = self.old_state_path
+        self.tmp.cleanup()
+
+    def _prime(self):
+        """先让 Alpha/Beta 处于「已同步且没变化」，只剩 Gone 该被删。"""
+        todo, _ = syncer.build_plan(self.api, self.cfg, self.state, log=lambda *_: None)
+        for item in todo:
+            self.state["families"][item["family"]] = {
+                "fingerprint": item["fingerprint"], "hash": "h", "assetId": 1,
+                "asset": item["family"] + "__x.zip"}
+        self.state["families"]["Gone"] = {"fingerprint": "old", "hash": "h",
+                                          "assetId": 999, "asset": "Gone__old.zip"}
+
+    def test_gone_family_asset_is_deleted_and_state_cleared(self):
+        self._prime()
+        gh = FakeSyncGh()
+        summary = syncer.run_sync(gh, self.api, self.cfg, self.state, log=lambda *_: None)
+        self.assertEqual(gh.deleted, [999], "远端那份应该被删掉")
+        self.assertNotIn("Gone", self.state["families"], "本地记录要一起清掉")
+        self.assertEqual([r["family"] for r in summary["removed"]], ["Gone"])
+        self.assertTrue(gh.commits, "删除也要留一条记账")
+        record = json.loads(list(gh.commits[0][0].values())[0].decode("utf-8"))
+        self.assertEqual([r["family"] for r in record["removed"]], ["Gone"],
+                         "记账文件里要写明删了哪个族（换机器时能对上）")
+        self.assertEqual(record["families"], [], "这一轮没有新上传")
+
+    def test_setting_off_keeps_remote_copy(self):
+        self._prime()
+        self.cfg["sync"]["deleteRemovedFamilies"] = False
+        gh = FakeSyncGh()
+        summary = syncer.run_sync(gh, self.api, self.cfg, self.state, log=lambda *_: None)
+        self.assertEqual(gh.deleted, [], "关掉设置就不许删远端")
+        self.assertIn("Gone", self.state["families"])
+
+
 class StoreLayoutTests(unittest.TestCase):
     """三个状态文件的位置（不碰它们，只检查路径）。"""
 

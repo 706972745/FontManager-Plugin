@@ -82,6 +82,7 @@ def snapshot():
                                             for x in (sync_cfg.get("excludeCopyright") or [])},
             "maxFamilyMB": max(1, int(int(sync_cfg.get("maxFamilyBytes") or 0) / 1048576) or 400),
             "deleteAfterDays": int(sync_cfg.get("deleteAfterDays") or 7),
+            "deleteRemoved": bool(sync_cfg.get("deleteRemovedFamilies", True)),
         },
         "deviceId": st.get("deviceId") or "",
         "syncedFamilies": len(st.get("families") or {}),
@@ -338,7 +339,8 @@ class _Handler(BaseHTTPRequestHandler):
                 "account": store.current_account()[0],
                 "sync": {"excludeCopyright": exclude,
                          "maxFamilyBytes": max_mb * 1024 * 1024,
-                         "deleteAfterDays": days},
+                         "deleteAfterDays": days,
+                         "deleteRemovedFamilies": bool(data.get("deleteRemoved", True))},
             }
             store.save_config(patch)
             store.remember_repo(owner or store.current_account()[0], name)
