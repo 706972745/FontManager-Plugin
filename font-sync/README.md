@@ -183,8 +183,8 @@ FontManager → **设置 → 插件** → 本插件那一行右侧**齿轮**（�
 python .github/package_plugin.py       # 输出 dist/font-sync.zip 与 dist/font-sync-full.zip
 ```
 
-- `font-sync.zip`：纯代码，**推荐**。FontManager 1.4.2+ 启用插件时会自动注入自带运行时，
-  同事什么都不用装；
+- `font-sync.zip`：纯代码，**推荐**。FontManager 1.4.4+ 内置共享运行时
+  （Python 3.13 + Pillow + fontTools），装上软件什么都不用配；
 - `font-sync-full.zip`：代码 + tests，调试用（不含 runtime —— runtime 由主程序注入，
   没必要重复背上 59 MB）。
 

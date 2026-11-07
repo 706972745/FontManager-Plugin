@@ -37,8 +37,8 @@
 
 > 前两个插件**自带 Python 运行时**（`runtime/`，Python 3.13 + Pillow + fontTools，各约 56 MB）——
 > 机器上**不用装任何东西**，下载解压即可。`plugin.json` 里的 `interpreterPath` 让主程序直接使用插件自带的环境。
-> `font-sync` 只用标准库，FontManager 1.4.2+ 启用插件时会**自动注入**主程序自带的运行时，
-> 什么都不用装；老版主程序则需系统有 Python 3.10+（或把上面任一插件的 `runtime/` 复制进插件目录）。
+> `font-sync` 只用标准库，FontManager 1.4.4+ **内置共享运行时**（Python 3.13 + Pillow + fontTools），
+> 什么都不用装；1.4.3 及以前的主程序则需系统有 Python 3.10+（或把上面任一插件的 `runtime/` 复制进插件目录）。
 >
 > 📖 每个插件目录里都有自己的**详细教程**（菜单用法、配置项、自检与卸载）：
 > [示例文本导出](specimen-export/) · [字体使用统计](font-stats/) · [字体库同步](font-sync/)
