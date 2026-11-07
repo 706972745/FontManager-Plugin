@@ -29,11 +29,18 @@
 |---|---|---|---|
 | [字体使用统计](font-stats/) | 1.1.0 | 右键字族 → 统计它的字面数与版权分类，结果写进该字族的备注 | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/font-stats.zip) |
 
-> 两个插件都**自带 Python 运行时**（`runtime/`，Python 3.13 + Pillow + fontTools，各约 56 MB）——
+### ☁️ 备份 / 多机同步
+
+| 插件 | 版本 | 说明 | 下载 |
+|---|---|---|---|
+| [字体库同步（GitHub）](font-sync/) | 0.1.0 | 把字体库**按字族**打包，增量同步到你自己的**私有** GitHub 仓库；只传变化的族；三条安全硬闸（私有性匿名探测 / 授权未知默认不传 / 令牌 DPAPI 加密）。零第三方依赖 | （开发中，暂用目录下载） |
+
+> 前两个插件**自带 Python 运行时**（`runtime/`，Python 3.13 + Pillow + fontTools，各约 56 MB）——
 > 机器上**不用装任何东西**，下载解压即可。`plugin.json` 里的 `interpreterPath` 让主程序直接使用插件自带的环境。
+> `font-sync` 只用标准库，系统里有 Python 3.10+ 就能跑；没有的话把上面任一插件的 `runtime/` 复制过来即可。
 >
 > 📖 每个插件目录里都有自己的**详细教程**（菜单用法、配置项、自检与卸载）：
-> [示例文本导出](specimen-export/) · [字体使用统计](font-stats/)
+> [示例文本导出](specimen-export/) · [字体使用统计](font-stats/) · [字体库同步](font-sync/)
 
 ## 🚀 安装
 
