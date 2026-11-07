@@ -2,8 +2,9 @@
 """打包插件 zip（CI 与本地共用同一套清单）。
 
 产物（写入仓库根的 dist/）：
-- font-sync.zip       纯代码（压缩），普通用户装这个
-- font-sync-full.zip  代码 + tests + runtime（不压缩），调试/离线用
+- font-sync.zip       纯代码（压缩），普通用户装这个；runtime 由主程序 1.4.2+
+                      启用插件时自动注入，不用（也不该）打进包里
+- font-sync-full.zip  代码 + tests（不压缩），调试用
 """
 import json
 import os

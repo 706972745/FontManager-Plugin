@@ -176,15 +176,17 @@ FontManager → **设置 → 插件** → 本插件那一行右侧**齿轮**（�
 
 ## 发给同事（不用 GitHub 也能发）
 
-插件不需要发布到 GitHub 才能给人用 —— 打个 ZIP 直接发微信 / 邮件 / 内网共享盘就行：
+插件不需要发布到 GitHub 才能给人用 —— ZIP 在 **releases/latest** 里就有（推 `font-sync/**`
+到 main 会触发 `Plugin Release` 工作流自动打包并覆盖上传），也可以本地打：
 
 ```bash
-cd font-sync
-python build_zip.py --with-runtime    # 自带 Python 运行时，~19 MB，同事什么都不用装
-python build_zip.py                   # 精简版，~34 KB，要求机器上有 Python 3.10+
+python .github/package_plugin.py       # 输出 dist/font-sync.zip 与 dist/font-sync-full.zip
 ```
 
-两个包都输出到 `Fonts工程文件/plug-zips-out/`（`font-sync-full.zip` / `font-sync.zip`）。
+- `font-sync.zip`：纯代码，**推荐**。FontManager 1.4.2+ 启用插件时会自动注入自带运行时，
+  同事什么都不用装；
+- `font-sync-full.zip`：代码 + tests，调试用（不含 runtime —— runtime 由主程序注入，
+  没必要重复背上 59 MB）。
 
 同事那边只要三步：
 
@@ -192,8 +194,8 @@ python build_zip.py                   # 精简版，~34 KB，要求机器上有 
 2. 整个文件夹放进 **FontManager → 设置 → 插件 →「打开插件目录」** 打开的那个目录；
 3. 回软件里打开开关（没看到就点「重新扫描」）→ 点齿轮按上面的「首次配置」填自己的令牌和自己的库。
 
-> **打包脚本用白名单**：只收 `main.py / gh.py / store.py / packer.py / syncer.py / panel.py /
-> panel.html / plugin.json / README.md / tests/`（可选 `runtime/`）。`secret.bin`（令牌）、`config.json`、`state.json`
+> **打包用白名单**：只收 `main.py / gh.py / store.py / packer.py / syncer.py / panel.py /
+> panel.html / plugin.json / README.md / tests/`。`secret.bin`（令牌）、`config.json`、`state.json`
 > **永远不会进包** —— 手打包时也要注意这一点，别把自己的令牌连同状态文件一起发出去。
 
 每个人配的是**自己的**账号和库：你发的只是这个工具，同事第一次用仍然要填他自己的 classic token。
