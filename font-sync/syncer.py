@@ -23,16 +23,28 @@ OPS_PREFIX = "ops"
 
 
 class LocalApi:
-    """主程序的本地 API（受限令牌）。只用到 `GET /fonts`。"""
+    """主程序的本地 API（受限令牌）。只用到 `GET /fonts`。
+
+    **必须绕开系统代理**：本地地址走 `HTTPS_PROXY`/`HTTP_PROXY` 会被代理当成外网请求，
+    代理连不上 127.0.0.1 就回 502（实测：「upstream connect failed」）。
+    这里用空 ProxyHandler 的 opener，逐请求生效，不动全局环境。
+    """
 
     def __init__(self, base, token, timeout=30):
         self.base = (base or "").rstrip("/")
         self.token = token or ""
         self.timeout = timeout
+        self._opener = None
+
+    def _open(self, req):
+        if self._opener is None:
+            import urllib.request
+
+            self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        return self._opener.open(req, timeout=self.timeout)
 
     def get(self, path):
         import urllib.error
-        import urllib.parse
         import urllib.request
 
         url = self.base + path
@@ -42,7 +54,7 @@ class LocalApi:
             "User-Agent": "FontManager-Plugin-font-sync/0.1",
         })
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with self._open(req) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             body = e.read()[:300].decode("utf-8", "replace")
