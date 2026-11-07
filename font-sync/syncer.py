@@ -266,13 +266,37 @@ def _ops_record(device_id, entries, removed):
     }
 
 
+def _find_asset_id(gh, owner, name, release_id, asset_name):
+    """撞名（422）时把已存在 asset 的 id 取回来。取不到就返回 None，不抛异常。"""
+    try:
+        for a in gh.list_assets(owner, name, release_id) or []:
+            if a.get("name") == asset_name:
+                return a.get("id")
+    except Exception:
+        pass
+    return None
+
+
+def _report(progress, phase, **fields):
+    """把进度报给界面。回调出错绝不能影响同步本身。"""
+    if not progress:
+        return
+    try:
+        progress(phase, **fields)
+    except Exception:
+        pass
+
+
 def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, progress=None):
     """跑一次同步。返回汇总字典。"""
     sync_cfg = cfg.get("sync") or {}
     delete_after = int(sync_cfg.get("deleteAfterDays") or 7) * 86400
     batch = max(1, int(sync_cfg.get("batchFamilies") or 100))
 
+    _report(progress, "scan")
     todo, skipped = build_plan(api, cfg, state, only_family, log)
+    total_bytes = sum(e["bytes"] for e in todo)
+    _report(progress, "plan", total=len(todo), bytesTotal=total_bytes)
     summary = {"planned": len(todo), "uploaded": 0, "failed": [], "deleted": 0,
                "removed": [], "skipped": skipped, "bytes": 0}
     gone = list(skipped.get("gone") or [])
@@ -299,16 +323,21 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, pr
             log("预演：以下族在本地已删除，正式同步时远端备份也会删掉 —— "
                 + "、".join(gone[:10]) + ("" if len(gone) <= 10 else f" 等 {len(gone)} 个"))
         log("预演结束：以上是本次会打包上传的内容，什么都没传")
+        _report(progress, "done", total=len(todo), done=0, bytesTotal=total_bytes,
+                message=f"预演完成：{len(todo)} 个族待传")
         return summary
 
+    _report(progress, "connect", total=len(todo), bytesTotal=total_bytes)
     owner, name, branch = ensure_repo(gh, cfg, state, log)
     release_id, bucket_tag = (None, None)
     entries, done = [], 0
     tmpdir = tempfile.mkdtemp(prefix="font-sync-")
 
     try:
-        for item in todo:
+        for index, item in enumerate(todo, start=1):
             family = item["family"]
+            _report(progress, "pack", done=done, total=len(todo), family=family,
+                    index=index, bytes=summary["bytes"], bytesTotal=total_bytes)
             try:
                 meta = packer.pack_family(os.path.join(tmpdir, "f.zip"), item["paths"])
                 prev = (state["families"].get(family) or {})
@@ -324,20 +353,25 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, pr
                 asset_obj = gh.upload_asset(owner, name, release_id, asset, blob)
                 asset_id = (asset_obj or {}).get("id")
                 if asset_id is None:
-                    # 422：同名 asset 已存在（上次传了但没记账），按成功处理
+                    # 422：同名 asset 已存在（上次传了但没记上账）。必须把它的 id
+                    # 找回来再记账 —— 否则这一族永远进不了 state，每次同步都会
+                    # 重新打包、重新撞 422；本地删掉它时也找不到要删哪个包。
                     log(f"  同名 asset 已存在，按成功处理：{asset}")
-                else:
-                    old = prev.get("assetId")
-                    if old:
-                        state["pendingDeletes"].append(
-                            {"assetId": old, "name": prev.get("asset"),
-                             "deleteAfter": int(time.time()) + delete_after})
-                    state["families"][family] = {
-                        "fingerprint": item["fingerprint"], "hash": meta["hash"],
-                        "asset": asset, "assetId": asset_id, "bucket": bucket_tag,
-                        "size": meta["size"], "fonts": meta["fonts"],
-                        "docs": meta["docs"], "at": int(time.time() * 1000),
-                    }
+                    asset_id = _find_asset_id(gh, owner, name, release_id, asset)
+                    if asset_id is None:
+                        log(f"  （没能取回 {asset} 的 id，先记账，删除时可能需要手工处理）")
+                # 无论新传还是撞名都要记账
+                old = prev.get("assetId")
+                if old and old != asset_id:
+                    state["pendingDeletes"].append(
+                        {"assetId": old, "name": prev.get("asset"),
+                         "deleteAfter": int(time.time()) + delete_after})
+                state["families"][family] = {
+                    "fingerprint": item["fingerprint"], "hash": meta["hash"],
+                    "asset": asset, "assetId": asset_id, "bucket": bucket_tag,
+                    "size": meta["size"], "fonts": meta["fonts"],
+                    "docs": meta["docs"], "at": int(time.time() * 1000),
+                }
                 entries.append({"family": family, "asset": asset, "hash": meta["hash"],
                                 "size": meta["size"], "fonts": meta["fonts"],
                                 "bucket": bucket_tag})
@@ -345,13 +379,16 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, pr
                 summary["bytes"] += meta["size"]
                 done += 1
                 log(f"  ↑ {family}（{meta['fonts']} 字面 {meta['size']/1048576:.2f} MB）→ {bucket_tag}")
-                if progress:
-                    progress(done, len(todo))
+                _report(progress, "upload", done=done, total=len(todo), family=family,
+                        index=index, bytes=summary["bytes"], bytesTotal=total_bytes)
                 if done % 20 == 0:
                     store.save_state(state)
             except Exception as e:  # 单族失败不拖垮整轮
                 summary["failed"].append({"family": family, "error": str(e)})
                 log(f"  ✗ {family}：{e}")
+                _report(progress, "failed", done=done, total=len(todo), family=family,
+                        index=index, bytes=summary["bytes"], bytesTotal=total_bytes,
+                        message=str(e))
     finally:
         try:
             os.remove(os.path.join(tmpdir, "f.zip"))
@@ -362,7 +399,9 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, pr
         except OSError:
             pass
 
-    for family in gone:
+    for position, family in enumerate(gone, start=1):
+        _report(progress, "delete", done=position, total=len(gone), family=family,
+                index=position, bytes=summary["bytes"], bytesTotal=total_bytes)
         info = state["families"].get(family) or {}
         asset_id = info.get("assetId")
         if not asset_id:
@@ -397,6 +436,11 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, pr
     log(f"本轮结束：上传 {summary['uploaded']} 个族 / {summary['bytes']/1048576:.1f} MB，"
         f"删除远端 {len(summary['removed'])} 个族，失败 {len(summary['failed'])}，"
         f"清掉旧 asset {summary['deleted']}")
+    _report(progress, "done", done=len(todo), total=len(todo),
+            bytes=summary["bytes"], bytesTotal=total_bytes,
+            message=(f"完成：上传 {summary['uploaded']} 个族"
+                     + (f"，删除 {len(summary['removed'])} 个" if summary["removed"] else "")
+                     + (f"，失败 {len(summary['failed'])} 个" if summary["failed"] else "")))
     return summary
 
 

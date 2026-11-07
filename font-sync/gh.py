@@ -22,6 +22,22 @@ UPLOADS = "https://uploads.github.com"
 UA = "FontManager-Plugin-font-sync/0.1"
 
 
+def _is_duplicate_asset(body):
+    """GitHub 对「同名 asset 已存在」回 422 + errors[].code == already_exists。
+
+    别的 422（content_type 不对、文件名非法、超过 2 GiB……）必须当真失败，
+    绝不能一律当成功。
+    """
+    try:
+        data = json.loads((body or b"").decode("utf-8", "replace"))
+    except Exception:
+        return False
+    for err in data.get("errors") or []:
+        if str((err or {}).get("code") or "").lower() == "already_exists":
+            return True
+    return False
+
+
 class GhError(RuntimeError):
     def __init__(self, status, message, body=None):
         super().__init__(f"GitHub {status}: {message}")
@@ -48,8 +64,15 @@ class Gh:
         auth=True,
         allow=(200, 201, 204),
         timeout=None,
+        content_type=None,
     ):
-        """发一个请求，返回 (status, 解析后的 JSON 或 None)。"""
+        """发一个请求，返回 (status, 解析后的 JSON 或 None)。
+
+        `content_type` 不能省：urllib 对带 data 的 POST 默认发
+        `application/x-www-form-urlencoded`，GitHub 的 release asset 上传接口
+        会直接拒（422 custom / content_type can't be ...），而且**不告诉你**
+        是格式问题。
+        """
         if url.startswith("/"):
             url = API + url
         attempt = 0
@@ -63,6 +86,8 @@ class Gh:
             if json_body is not None:
                 payload = json.dumps(json_body).encode("utf-8")
                 headers["Content-Type"] = "application/json"
+            elif content_type:
+                headers["Content-Type"] = content_type
             req = urllib.request.Request(url, data=payload, headers=headers, method=method)
             try:
                 with self._open(req, timeout) as resp:
@@ -268,14 +293,15 @@ class Gh:
         try:
             status, data = self.request(
                 "POST", url, data=blob, accept="application/vnd.github+json",
-                allow=(201, 422), timeout=timeout)
+                content_type="application/octet-stream",
+                allow=(201, 202), timeout=timeout)
         except GhError as e:
-            # 同名 asset 已存在：GitHub 回 422，当成功（幂等重传）
-            if e.status == 422:
+            # 只有「同名 asset 已存在」才当成功（幂等重传）。其它 422 一律抛出去 ——
+            # 曾经把 422 全当成功，结果上传因为 Content-Type 不对一直失败，
+            # 界面上却显示「同步完成」，实际远端一个包都没有。
+            if e.status == 422 and _is_duplicate_asset(e.body):
                 return None
             raise
-        if status == 422:
-            return None
         return data
 
     def delete_asset(self, owner, name, asset_id):

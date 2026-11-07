@@ -289,6 +289,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": "unauthorized"}, 403)
             if parsed.path == "/api/state":
                 return self._json({"ok": True, "state": snapshot()})
+            if parsed.path == "/api/progress":
+                return self._json({"ok": True, "progress": self.panel.progress()})
             return self._json({"ok": False, "error": "unknown endpoint"}, 404)
         return self._json({"ok": False, "error": "not found"}, 404)
 
@@ -489,9 +491,11 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class Panel:
-    def __init__(self, actions=None):
+    def __init__(self, actions=None, progress=None):
         self.key = secrets.token_urlsafe(24)
         self.actions = actions or {}
+        # 插件主进程注入的「当前同步进度」读取函数；面板只读不写
+        self.progress = progress or (lambda: {})
         self.last_hit = time.time()
         self.httpd = None
         self.port = 0
@@ -553,12 +557,14 @@ class Panel:
 _CURRENT = {"panel": None}
 
 
-def open_panel(actions=None, tab="account"):
+def open_panel(actions=None, tab="account", progress=None):
     """已经开着就复用（同一个 key），否则新起一个。返回 URL。"""
     panel = _CURRENT.get("panel")
     if panel and panel.alive():
         panel.actions.update(actions or {})
+        if progress:
+            panel.progress = progress
         return panel.open(tab)
-    panel = Panel(actions).start()
+    panel = Panel(actions, progress=progress).start()
     _CURRENT["panel"] = panel
     return panel.open(tab)

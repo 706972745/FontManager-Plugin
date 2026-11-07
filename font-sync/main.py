@@ -20,6 +20,7 @@ import json
 import os
 import sys
 import threading
+import time
 import traceback
 
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -89,6 +90,48 @@ def require_configured(interactive=True):
     return False
 
 
+# ── 同步进度（给设置面板轮询） ──────────────────────────────────────────
+# 面板和同步在同一个进程里，所以直接用内存字典即可。字段全是展示用的，
+# 读的时候加锁拿一份副本，避免面板线程读到半更新的状态。
+PROGRESS = {
+    "phase": "idle",     # idle / scan / plan / connect / pack / upload / delete / done / error
+    "scope": "", "dryRun": False,
+    "done": 0, "total": 0, "index": 0, "family": "",
+    "bytes": 0, "bytesTotal": 0,
+    "message": "", "error": "",
+    "startedAt": 0, "updatedAt": 0, "finishedAt": 0,
+}
+_PROGRESS_LOCK = threading.Lock()
+
+
+def _reset_progress(dry_run, scope):
+    now = int(time.time() * 1000)
+    with _PROGRESS_LOCK:
+        PROGRESS.update({"phase": "starting", "scope": scope, "dryRun": bool(dry_run),
+                         "done": 0, "total": 0, "index": 0, "family": "",
+                         "bytes": 0, "bytesTotal": 0, "message": "", "error": "",
+                         "startedAt": now, "updatedAt": now, "finishedAt": 0})
+
+
+def _on_progress(phase, **fields):
+    now = int(time.time() * 1000)
+    with _PROGRESS_LOCK:
+        PROGRESS["phase"] = phase
+        for k, v in fields.items():
+            if k in PROGRESS and k not in ("startedAt", "finishedAt"):
+                PROGRESS[k] = v
+        PROGRESS["updatedAt"] = now
+        if phase in ("done", "error"):
+            PROGRESS["finishedAt"] = now
+
+
+def progress_snapshot():
+    with _PROGRESS_LOCK:
+        snap = dict(PROGRESS)
+    snap["running"] = snap["phase"] not in ("idle", "done", "error")
+    return snap
+
+
 # ── 同步任务 ────────────────────────────────────────────────────────────
 def do_sync(only_family=None, dry_run=False):
     if not require_configured():
@@ -96,6 +139,8 @@ def do_sync(only_family=None, dry_run=False):
     if not SYNC_LOCK.acquire(blocking=False):
         toast("已经在同步了，等这一轮结束")
         return
+    scope = only_family or "全部字族"
+    _reset_progress(dry_run, scope)
     try:
         cfg = store.load_config()
         state = store.load_state()
@@ -103,11 +148,10 @@ def do_sync(only_family=None, dry_run=False):
         client = gh_client()
         login = store.current_account()[0]
         target = f"{(cfg.get('owner') or login)}/{cfg.get('repoName')}"
-        scope = only_family or "全部字族"
         toast(("预演：" if dry_run else "开始同步：") + f"{scope} → {target}")
         log(f"=== 同步开始（{scope}{'，预演' if dry_run else ''}），账号 {login}，目标 {target} ===")
         summary = syncer.run_sync(client, api, cfg, state, only_family=only_family,
-                                  dry_run=dry_run, log=log)
+                                  dry_run=dry_run, log=log, progress=_on_progress)
         if dry_run:
             toast(f"预演完成：{summary['planned']} 个族待传，未上传任何内容")
         else:
@@ -120,7 +164,14 @@ def do_sync(only_family=None, dry_run=False):
     except Exception as e:
         log("同步失败：" + traceback.format_exc(limit=4).replace("\n", " | "))
         toast(f"同步失败：{e}")
+        _on_progress("error", message=str(e), error=str(e))
     finally:
+        # 兜底：任何异常路径都要让面板看到「结束了」，否则进度条会一直转
+        with _PROGRESS_LOCK:
+            if PROGRESS["phase"] not in ("done", "error", "idle"):
+                PROGRESS["phase"] = "error"
+                PROGRESS["message"] = PROGRESS["message"] or "同步提前结束"
+                PROGRESS["finishedAt"] = int(time.time() * 1000)
         SYNC_LOCK.release()
 
 
@@ -140,7 +191,7 @@ def open_settings_panel(tab="account"):
         "sync": lambda: run_async(do_sync),
     }
     try:
-        url = panel.open_panel(actions, tab=tab)
+        url = panel.open_panel(actions, tab=tab, progress=progress_snapshot)
         log(f"设置面板：{url}")
     except Exception as e:
         toast(f"打不开设置面板：{e}")

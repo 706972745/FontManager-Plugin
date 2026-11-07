@@ -526,6 +526,191 @@ class RepoNameTests(unittest.TestCase):
             self.assertIn(hint, problem, f"{name!r} 的提示不对：{problem}")
 
 
+class ProgressTests(unittest.TestCase):
+    """同步进度：阶段、逐族计数、回调崩了也不能影响同步。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.files = make_tree(self.tmp.name, {"a/A.ttf": 1024, "b/B.ttf": 1024})
+        self.api = FakeApi([
+            {"path": self.files["a/A.ttf"], "family": "Alpha", "copyrightClass": "free"},
+            {"path": self.files["b/B.ttf"], "family": "Beta", "copyrightClass": "free"},
+        ])
+        self.cfg = {"sync": {"excludeCopyright": [], "maxFamilyBytes": 10 << 20,
+                             "deleteRemovedFamilies": True, "deleteAfterDays": 7}}
+        self.state = {"deviceId": "dev", "repo": "", "families": {},
+                      "pendingDeletes": [], "lastSyncAt": 0}
+        self.old_state = store.STATE_PATH
+        store.STATE_PATH = os.path.join(self.tmp.name, "state.json")
+        self.old_ensure = syncer.ensure_repo
+        syncer.ensure_repo = lambda *a, **k: ("owner", "repo", "main")
+
+    def tearDown(self):
+        syncer.ensure_repo = self.old_ensure
+        store.STATE_PATH = self.old_state
+        self.tmp.cleanup()
+
+    def test_reports_every_stage_with_growing_counter(self):
+        events = []
+        syncer.run_sync(FakeSyncGh(), self.api, self.cfg, self.state,
+                        log=lambda *_: None,
+                        progress=lambda phase, **kw: events.append((phase, kw)))
+        phases = [e[0] for e in events]
+        for stage in ("scan", "plan", "connect", "pack", "upload", "done"):
+            self.assertIn(stage, phases, f"缺阶段 {stage}")
+        ups = [kw for ph, kw in events if ph == "upload"]
+        self.assertEqual([u["done"] for u in ups], [1, 2], "每传完一个族计数要加一")
+        self.assertEqual({u["total"] for u in ups}, {2})
+        self.assertGreater(ups[-1]["bytes"], 0)
+        self.assertIn("total", events[phases.index("plan")][1])
+
+    def test_dry_run_ends_with_done(self):
+        events = []
+        syncer.run_sync(FakeSyncGh(), self.api, self.cfg, self.state, dry_run=True,
+                        log=lambda *_: None,
+                        progress=lambda phase, **kw: events.append((phase, kw)))
+        self.assertEqual(events[-1][0], "done")
+        self.assertIn("预演", events[-1][1]["message"])
+        self.assertNotIn("upload", [e[0] for e in events], "预演不该有上传阶段")
+
+    def test_broken_callback_does_not_break_the_sync(self):
+        def boom(*_a, **_kw):
+            raise RuntimeError("UI 炸了")
+        summary = syncer.run_sync(FakeSyncGh(), self.api, self.cfg, self.state,
+                                  log=lambda *_: None, progress=boom)
+        self.assertEqual(summary["uploaded"], 2, "进度回调抛异常不能把同步带崩")
+
+    def test_panel_exposes_progress(self):
+        import urllib.request
+        import panel as panel_mod
+        panel = panel_mod.Panel({}, progress=lambda: {"phase": "upload", "done": 3,
+                                                     "total": 9, "running": True}).start()
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{panel.port}/api/progress",
+                                         headers={"X-Panel-Key": panel.key})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                body = json.loads(r.read())
+            self.assertTrue(body["ok"])
+            self.assertEqual(body["progress"]["done"], 3)
+            self.assertTrue(body["progress"]["running"])
+        finally:
+            panel.stop()
+
+
+class DuplicateAssetTests(unittest.TestCase):
+    """上传撞 422（同名 asset 已存在）时也要把状态记上。
+
+    实机踩到的：撞名被「按成功处理」但没有写 state.families，
+    结果那一族永远不记账 —— 每次同步都重新打包、重新撞 422，
+    本地删掉它时也找不到要删哪个 asset。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.files = make_tree(self.tmp.name, {"a/A.ttf": 1024})
+        self.api = FakeApi([
+            {"path": self.files["a/A.ttf"], "family": "Alpha", "copyrightClass": "free"},
+        ])
+        self.cfg = {"sync": {"excludeCopyright": [], "maxFamilyBytes": 10 << 20,
+                             "deleteRemovedFamilies": True, "deleteAfterDays": 7}}
+        self.state = {"deviceId": "dev", "repo": "", "families": {},
+                      "pendingDeletes": [], "lastSyncAt": 0}
+        self.old_state = store.STATE_PATH
+        store.STATE_PATH = os.path.join(self.tmp.name, "state.json")
+        self.old_ensure = syncer.ensure_repo
+        syncer.ensure_repo = lambda *a, **k: ("owner", "repo", "main")
+
+    def tearDown(self):
+        syncer.ensure_repo = self.old_ensure
+        store.STATE_PATH = self.old_state
+        self.tmp.cleanup()
+
+    def _gh(self, found):
+        gh = FakeSyncGh()
+        gh.upload_asset = lambda owner, name, rid, asset, blob: {}   # 422
+        gh.list_assets = lambda owner, name, rid: found
+        return gh
+
+    def test_collision_records_state_even_without_asset_id(self):
+        summary = syncer.run_sync(self._gh([]), self.api, self.cfg, self.state,
+                                  log=lambda *_: None)
+        self.assertEqual(summary["uploaded"], 1, "撞名按成功计")
+        self.assertIn("Alpha", self.state["families"], "撞名也必须记账，否则下次又重传")
+        self.assertIsNone(self.state["families"]["Alpha"]["assetId"])
+        self.assertEqual(self.state["pendingDeletes"], [],
+                         "撞的是同一个 asset，绝不能塞进待删队列")
+
+    def test_collision_recovers_the_existing_asset_id(self):
+        orig = syncer.packer.asset_name
+        syncer.packer.asset_name = lambda family, meta: f"{family}.zip"
+        try:
+            gh = self._gh([{"name": "Alpha.zip", "id": 4242}])
+            syncer.run_sync(gh, self.api, self.cfg, self.state, log=lambda *_: None)
+        finally:
+            syncer.packer.asset_name = orig
+        self.assertEqual(self.state["families"]["Alpha"]["assetId"], 4242,
+                         "取回 id 才能在本地删族时删掉远端那份")
+        self.assertEqual(self.state["pendingDeletes"], [])
+
+
+class UploadContentTypeTests(unittest.TestCase):
+    """上传必须带 Content-Type，且不能把任何 422 都当成功。
+
+    实机踩到的：urllib 对带 data 的 POST 默认发 application/x-www-form-urlencoded，
+    GitHub 直接 422（custom / content_type can't be ...），而代码把 422 一律当
+    「同名 asset 已存在」按成功处理 —— **界面显示同步完成，远端一个包都没有**。
+    """
+
+    def setUp(self):
+        import gh as ghmod
+        self.gh = ghmod
+
+    def test_upload_sends_octet_stream(self):
+        c = self.gh.Gh("t")
+        seen = {}
+
+        def fake(method, url, **kw):
+            seen["method"] = method
+            seen["url"] = url
+            seen.update(kw)
+            return 201, {"id": 7}
+
+        c.request = fake
+        obj = c.upload_asset("o", "r", 42, "a.zip", b"x")
+        self.assertEqual(obj["id"], 7)
+        self.assertEqual(seen.get("content_type"), "application/octet-stream",
+                         "不带 Content-Type 会被 GitHub 422 拒掉")
+        self.assertIn("/releases/42/assets", seen["url"])
+
+    def test_duplicate_422_counts_as_success(self):
+        c = self.gh.Gh("t")
+        body = b'{"message":"Validation Failed","errors":[{"code":"already_exists"}]}'
+
+        def fake(method, url, **kw):
+            raise self.gh.GhError(422, "already exists", body)
+
+        c.request = fake
+        self.assertIsNone(c.upload_asset("o", "r", 1, "a.zip", b"x"))
+
+    def test_other_422_is_an_error(self):
+        c = self.gh.Gh("t")
+        body = b'{"message":"Validation Failed","errors":[{"code":"custom","field":"content_type"}]}'
+
+        def fake(method, url, **kw):
+            raise self.gh.GhError(422, "content_type can't be ...", body)
+
+        c.request = fake
+        with self.assertRaises(self.gh.GhError):
+            c.upload_asset("o", "r", 1, "a.zip", b"x")
+
+    def test_duplicate_detector_ignores_noise(self):
+        self.assertTrue(self.gh._is_duplicate_asset(
+            b'{"errors":[{"code":"already_exists"}]}'))
+        self.assertFalse(self.gh._is_duplicate_asset(b'{"errors":[{"code":"custom"}]}'))
+        self.assertFalse(self.gh._is_duplicate_asset(b"not json"))
+        self.assertFalse(self.gh._is_duplicate_asset(None))
+
+
 class FamilyCapTests(unittest.TestCase):
     """单族上限：默认 85 MB（用户 2026-11-07 定的），且只在一个地方定义。"""
 
@@ -775,18 +960,19 @@ class PanelTests(unittest.TestCase):
             self.assertIn(anchor, html)
 
     def test_panel_js_sends_body_for_every_action(self):
-        """页面里除 `state` 外的每个 api() 调用都要显式传参数。
+        """只读接口（state / progress）之外，每个 api() 调用都要显式传参数。
 
-        api() 现在按「路径是不是 state」决定 GET/POST，不再靠 body 猜；
-        这条测试盯住调用点，避免有人又把 `api('xxx')` 写回来。
+        api() 按路径决定 GET/POST，不再靠 body 猜；这条测试盯住调用点，
+        避免有人又把 `api('xxx')` 写回来 —— 那会把动作发成 GET → unknown endpoint。
         """
         import re
         from pathlib import Path
         html = (Path(HERE) / "panel.html").read_text(encoding="utf-8")
+        read_only = ("state", "progress")
         bad = []
         for m in re.finditer(r"api\('([^']+)'\s*([,)])", html):
             name, tail = m.group(1), m.group(2)
-            if name == "state":
+            if name in read_only:
                 continue
             if tail == ")":
                 bad.append(name)
