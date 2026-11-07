@@ -1,0 +1,13 @@
+# 令牌与运行状态：绝对不能进仓库、也绝对不能打进发给同事的 ZIP
+secret.bin
+config.json
+state.json
+state.json.tmp
+secret.bin.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+
+# 打包产物
+*.zip

@@ -102,6 +102,30 @@ FontManager → **设置 → 插件** → 本插件那一行右侧**齿轮** →
   换了库就等于换了远端，首次会全量传一遍（这是预期行为，别当成 bug）。
 - 移除账号只是删掉本机保存的令牌，**不影响** GitHub 上的仓库和里面的字体。
 
+## 发给同事（不用 GitHub 也能发）
+
+插件不需要发布到 GitHub 才能给人用 —— 打个 ZIP 直接发微信 / 邮件 / 内网共享盘就行：
+
+```bash
+cd font-sync
+python build_zip.py --with-runtime    # 自带 Python 运行时，~19 MB，同事什么都不用装
+python build_zip.py                   # 精简版，~34 KB，要求机器上有 Python 3.10+
+```
+
+两个包都输出到 `Fonts工程文件/plug-zips-out/`（`font-sync-full.zip` / `font-sync.zip`）。
+
+同事那边只要三步：
+
+1. 解压出 `font-sync` 文件夹；
+2. 整个文件夹放进 **FontManager → 设置 → 插件 →「打开插件目录」** 打开的那个目录；
+3. 回软件里打开开关（没看到就点「重新扫描」）→ 点齿轮按上面的「首次配置」填自己的令牌和自己的库。
+
+> **打包脚本用白名单**：只收 `main.py / gh.py / store.py / packer.py / syncer.py / plugin.json /
+> README.md / tests/`（可选 `runtime/`）。`secret.bin`（令牌）、`config.json`、`state.json`
+> **永远不会进包** —— 手打包时也要注意这一点，别把自己的令牌连同状态文件一起发出去。
+
+每个人配的是**自己的**账号和库：你发的只是这个工具，同事第一次用仍然要填他自己的 classic token。
+
 ## 三种用法
 
 | 位置 | 菜单项 | 做什么 |
