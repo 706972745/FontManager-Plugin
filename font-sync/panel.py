@@ -612,6 +612,14 @@ class _Handler(BaseHTTPRequestHandler):
             fn()
             return self._json({"ok": True, "message": "预演下载已开始，进度见下方进度条"})
 
+        if path == "/api/open-external":
+            # 面板开在主程序应用内窗口后，页面点不动外链（webview 禁外部跳转）——
+            # 请插件进程发 open-url 消息，主程序用系统默认浏览器打开（1.4.5+）
+            fn = self.panel.actions.get("openExternal")
+            if not fn:
+                return self._json({"ok": False, "error": "no-handler"})
+            fn(str(data.get("url") or ""))
+            return self._json({"ok": True})
         if path == "/api/restore":
             fn = self.panel.actions.get("restore")
             if not fn:

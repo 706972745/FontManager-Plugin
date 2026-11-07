@@ -630,6 +630,23 @@
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  // ── 外链：面板开在主程序应用内窗口时，webview 点不动 target=_blank ——
+  // 交给插件进程发 open-url 消息，主程序用系统默认浏览器打开（主程序 1.4.5+）。
+  // 没有这个通道（老主程序 / 真浏览器）时回退 window.open。
+  async function openExternal(url) {
+    try {
+      const r = await api('open-external', { url });
+      if (r.ok) return;
+    } catch (e) { /* 落到兜底 */ }
+    window.open(url, '_blank', 'noopener');
+  }
+  document.addEventListener('click', (ev) => {
+    const a = ev.target.closest('a[target="_blank"]');
+    if (!a || !a.href || !/^https?:/i.test(a.href)) return;
+    ev.preventDefault();
+    void openExternal(a.href);
+  });
+
   async function api(path, body) {
     // 只有读状态用 GET，其余动作一律 POST —— 别用「有没有 body」来猜方法：
     // 曾经 dryrun / sync 因为没传 body 被发成 GET，后端只在 POST 分支处理，

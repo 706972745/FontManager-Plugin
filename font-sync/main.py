@@ -61,6 +61,17 @@ def toast(message):
     emit("toast", message)
 
 
+def open_external(url):
+    """请主程序在系统默认浏览器打开网页（面板开在应用内窗口后，webview 点不动外链）。
+    主程序 1.4.5+ 支持；更早版本只会记一条日志，页面自行 window.open 兜底。"""
+    url = str(url or "").strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
+        toast("拒绝打开非 http(s) 链接：" + url[:80])
+        return
+    sys.stdout.write(json.dumps({"type": "open-url", "url": url}, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
 # ── 客户端 ──────────────────────────────────────────────────────────────
 def local_api():
     if not API_BASE or not API_TOKEN:
@@ -279,6 +290,7 @@ def open_settings_panel(tab="account"):
         "restore": lambda: run_async(do_restore),
         # 面板「补缺」要用的本地 API 客户端（读快照 + 字体清单）与通用动作分发
         "localApi": local_api,
+        "openExternal": open_external,
         "dispatch": dispatch_action,
     }
     try:
