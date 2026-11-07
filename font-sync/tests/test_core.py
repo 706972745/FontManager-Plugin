@@ -300,5 +300,122 @@ class GhTests(unittest.TestCase):
         self.assertTrue(gh._error_text(b'{"message":"Validation Failed","errors":[{"code":"x"}]}'))
 
 
+class StoreLayoutTests(unittest.TestCase):
+    """三个状态文件的位置（不碰它们，只检查路径）。"""
+
+    def test_state_files_live_inside_the_plugin_dir(self):
+        """config/secret/state 必须和 main.py 同级。
+
+        反例（0.1.1）：PLUGIN_DIR 多剥了一层目录，三个文件全写到 plugins\\ 下，
+        「打开同步状态目录」也打开错的层级。
+        """
+        here = os.path.dirname(os.path.abspath(store.__file__))
+        self.assertEqual(store.PLUGIN_DIR, here, "PLUGIN_DIR 必须就是插件目录")
+        for path in (store.CONFIG_PATH, store.SECRET_PATH, store.STATE_PATH):
+            self.assertEqual(os.path.dirname(path), here, f"{path} 不在插件目录里")
+
+
+class PanelTests(unittest.TestCase):
+    """设置面板：没 key 一律拒、有 key 能读能存、页面文件存在且引用的 id 都在。"""
+
+    def setUp(self):
+        import panel
+        self.panel_mod = panel
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = (store.CONFIG_PATH, store.STATE_PATH, store.SECRET_PATH)
+        store.CONFIG_PATH = os.path.join(self.tmp.name, "config.json")
+        store.STATE_PATH = os.path.join(self.tmp.name, "state.json")
+        store.SECRET_PATH = os.path.join(self.tmp.name, "secret.bin")
+        store._reset_cache()
+
+    def tearDown(self):
+        (store.CONFIG_PATH, store.STATE_PATH, store.SECRET_PATH) = self.saved
+        store._reset_cache()
+        self.tmp.cleanup()
+
+    def test_permission_table_covers_every_write_action(self):
+        rows = self.panel_mod.PERMISSION_TABLE
+        scopes = {r["scope"] for r in rows}
+        self.assertIn("repo", scopes, "建仓/上传/记账都必须写明要 repo")
+        writes = [r for r in rows if r["api"].startswith(("POST", "PATCH", "DELETE"))]
+        self.assertTrue(writes)
+        for r in writes:
+            self.assertEqual(r["scope"], "repo", f"{r['api']} 是写操作，scope 必须写清楚")
+
+    def test_scope_flags_distinguish_classic_and_fine_grained(self):
+        flags = self.panel_mod._scope_flags(["repo", "read:user"])
+        self.assertTrue(flags["known"])
+        self.assertTrue(flags["repo"])
+        self.assertFalse(self.panel_mod._scope_flags(["public_repo"])["repo"],
+                         "public_repo 不够，建私有仓会被拒")
+        unknown = self.panel_mod._scope_flags([])
+        self.assertFalse(unknown["known"], "fine-grained 不返回 scope，不能假装知道")
+        self.assertIsNone(unknown["repo"])
+
+    def test_snapshot_never_leaks_the_token(self):
+        store.upsert_account("someone", "ghp_realtoken_should_not_appear_0001")
+        snap = self.panel_mod.snapshot()
+        blob = json.dumps(snap, ensure_ascii=False)
+        self.assertNotIn("ghp_realtoken", blob, "面板快照里绝不能出现令牌原文")
+        self.assertEqual(snap["login"], "someone")
+        self.assertFalse(snap["configured"], "只存了令牌、没填仓库时还不算配好")
+
+    def test_panel_requires_a_key_and_saves_config(self):
+        import urllib.error
+        import urllib.request
+
+        panel = self.panel_mod.Panel({}).start()
+        base = f"http://127.0.0.1:{panel.port}"
+        try:
+            def call(path, body=None, key=True):
+                headers = {"Content-Type": "application/json"}
+                if key:
+                    headers["X-Panel-Key"] = panel.key
+                data = json.dumps(body).encode("utf-8") if body is not None else None
+                req = urllib.request.Request(base + path, data=data, headers=headers,
+                                             method="POST" if data else "GET")
+                try:
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        return resp.status, resp.read().decode("utf-8")
+                except urllib.error.HTTPError as e:
+                    return e.code, e.read().decode("utf-8")
+
+            self.assertEqual(call("/api/state", key=False)[0], 403, "没 key 必须拒")
+            self.assertEqual(call("/?k=wrong", key=False)[0], 403, "key 不对也不能给页面")
+
+            code, body = call("/api/state")
+            self.assertEqual(code, 200)
+            self.assertFalse(json.loads(body)["state"]["configured"])
+
+            code, body = call("/api/save", {"repoName": "  "})
+            self.assertEqual(code, 200)
+            self.assertFalse(json.loads(body)["ok"], "空仓库名不能被保存")
+
+            code, body = call("/api/save", {"repoName": "my-fonts", "owner": "",
+                                            "excludeUnknown": True, "maxFamilyMB": 300,
+                                            "deleteAfterDays": 3})
+            data = json.loads(body)
+            self.assertTrue(data["ok"])
+            self.assertEqual(data["state"]["repoName"], "my-fonts")
+            self.assertEqual(data["state"]["sync"]["maxFamilyMB"], 300)
+            cfg = store.load_config()
+            self.assertEqual(cfg["sync"]["maxFamilyBytes"], 300 * 1024 * 1024)
+            self.assertIn("unknown", cfg["sync"]["excludeCopyright"])
+        finally:
+            panel.stop()
+
+    def test_panel_html_ids_are_all_defined(self):
+        import re
+        from pathlib import Path
+        html = (Path(HERE) / "panel.html").read_text(encoding="utf-8")
+        ids = set(re.findall(r'\bid="([^"]+)"', html))
+        refs = set(re.findall(r"\$\('([^']+)'\)", html))
+        self.assertEqual(sorted(refs - ids), [], "JS 引用了不存在的元素 id")
+        for tab in ("account", "repo", "perm", "guide", "adv"):
+            self.assertIn(f'id="tab-{tab}"', html)
+        self.assertIn("settings/tokens/new?scopes=repo", html,
+                      "教程里必须给「已预勾 repo」的建令牌直链")
+
+
 if __name__ == "__main__":
     unittest.main()

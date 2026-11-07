@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>字体库同步 · 设置</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1c2024;
+    --ink-2: #5b6470;
+    --line: #e3e6ea;
+    --accent: #3b5bdb;
+    --accent-soft: #eef1fd;
+    --ok: #1a7f37;
+    --ok-soft: #e8f5ec;
+    --warn: #9a6700;
+    --warn-soft: #fff8e5;
+    --bad: #c0392b;
+    --bad-soft: #fdecea;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171b;
+      --card: #1c2025;
+      --ink: #e6e9ed;
+      --ink-2: #9aa4b1;
+      --line: #2b3138;
+      --accent: #7d95ff;
+      --accent-soft: #232a3d;
+      --ok: #5ed17f;
+      --ok-soft: #1c2c22;
+      --warn: #e2b13c;
+      --warn-soft: #2e2718;
+      --bad: #ff8579;
+      --bad-soft: #2f1d1b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.65 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 22px 20px 60px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
+  .logo {
+    width: 40px; height: 40px; border-radius: 11px; flex: 0 0 auto;
+    background: linear-gradient(140deg, #4c6ef5, #2b3fa8); color: #fff;
+    display: grid; place-items: center; font-weight: 700; font-size: 19px;
+  }
+  h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  .sub { margin: 2px 0 0; color: var(--ink-2); font-size: 12.5px; }
+  .pill {
+    margin-left: auto; padding: 6px 13px; border-radius: 999px; font-size: 12.5px;
+    background: var(--accent-soft); color: var(--accent); border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .pill.bad { background: var(--bad-soft); color: var(--bad); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+
+  nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  nav button {
+    font: inherit; font-size: 13.5px; padding: 7px 14px; border-radius: 9px;
+    border: 1px solid var(--line); background: var(--card); color: var(--ink-2);
+    cursor: pointer;
+  }
+  nav button:hover { border-color: var(--accent); color: var(--accent); }
+  nav button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  section { display: none; }
+  section.on { display: block; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 13px;
+    padding: 18px 20px; margin-bottom: 14px;
+  }
+  .card h2 { font-size: 14.5px; margin: 0 0 4px; display: flex; align-items: center; gap: 9px; }
+  .num {
+    width: 21px; height: 21px; border-radius: 50%; background: var(--accent); color: #fff;
+    font-size: 12px; display: inline-grid; place-items: center; flex: 0 0 auto;
+  }
+  .card p { margin: 6px 0; color: var(--ink-2); }
+  .card p.lead { color: var(--ink); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0 0; }
+  label.f { color: var(--ink-2); font-size: 12.5px; display: block; margin-bottom: 4px; }
+  input[type=text], input[type=password], input[type=number] {
+    font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--card); color: var(--ink); min-width: 220px; flex: 1 1 240px;
+  }
+  input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+  button.act {
+    font: inherit; font-size: 13.5px; padding: 8px 16px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  }
+  button.act.ghost { background: transparent; color: var(--accent); }
+  button.act.danger { background: transparent; border-color: var(--bad); color: var(--bad); }
+  button.act:disabled { opacity: .55; cursor: default; }
+  /* 深色下亮蓝底 + 白字对比度不够，改成深色字 */
+  @media (prefers-color-scheme: dark) {
+    button.act:not(.ghost):not(.danger) { color: #10131a; font-weight: 600; }
+    nav button.on { color: #10131a; font-weight: 600; }
+  }
+  ol.steps a, .card p a { color: var(--accent); }
+  a.btn {
+    display: inline-block; font-size: 13.5px; padding: 7px 14px; border-radius: 8px;
+    border: 1px solid var(--line); color: var(--accent); text-decoration: none; background: var(--card);
+  }
+  a.btn:hover { border-color: var(--accent); }
+  code, pre { font-family: var(--mono); font-size: 12.5px; }
+  code { background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--accent-soft); padding: 10px 12px; border-radius: 8px; overflow: auto; }
+
+  .note {
+    border-radius: 9px; padding: 10px 13px; margin: 10px 0 0; font-size: 13px;
+    border: 1px solid var(--line); background: var(--bg);
+  }
+  .note.ok { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
+  .note.bad { background: var(--bad-soft); border-color: transparent; color: var(--bad); }
+  .note.warn { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
+  .note b { color: inherit; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--ink-2); font-weight: 600; font-size: 12.5px; }
+  tr:last-child td { border-bottom: none; }
+  td.mono { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+  .tag {
+    display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px;
+    background: var(--accent-soft); color: var(--accent); font-family: var(--mono);
+  }
+  .yes { color: var(--ok); font-weight: 600; }
+  .no { color: var(--bad); font-weight: 600; }
+  .unknown { color: var(--warn); font-weight: 600; }
+
+  ul.plain { margin: 8px 0 0; padding-left: 20px; color: var(--ink-2); }
+  ul.plain li { margin: 3px 0; }
+  ol.steps { margin: 6px 0 0; padding-left: 22px; }
+  ol.steps > li { margin: 10px 0; }
+  ol.steps b { color: var(--ink); }
+  details { border-top: 1px solid var(--line); padding: 9px 0; }
+  details summary { cursor: pointer; color: var(--ink); font-size: 13.5px; }
+  details p, details ul { color: var(--ink-2); }
+
+  .accts { margin-top: 12px; border-top: 1px solid var(--line); }
+  .acct {
+    display: flex; align-items: center; gap: 10px; padding: 9px 0;
+    border-bottom: 1px solid var(--line); font-size: 13.5px;
+  }
+  .acct:last-child { border-bottom: none; }
+  .acct .who { font-weight: 600; }
+  .acct .mask { color: var(--ink-2); font-family: var(--mono); font-size: 12px; }
+  .acct .sp { margin-left: auto; }
+  .badge-cur {
+    padding: 1px 8px; border-radius: 999px; background: var(--ok-soft); color: var(--ok);
+    font-size: 11.5px;
+  }
+  footer {
+    margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line);
+    color: var(--ink-2); font-size: 12.5px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  }
+  footer .sp { margin-left: auto; }
+  .kbd {
+    font-family: var(--mono); font-size: 12px; border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; background: var(--bg);
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">F</div>
+    <div>
+      <h1>字体库同步 · 设置</h1>
+      <p class="sub" id="sub">正在读取…</p>
+    </div>
+    <div class="pill" id="pill">读取中…</div>
+  </header>
+
+  <nav id="nav">
+    <button data-tab="account" class="on">账号与令牌</button>
+    <button data-tab="repo">同步到哪个库</button>
+    <button data-tab="perm">权限说明</button>
+    <button data-tab="guide">新手教程</button>
+    <button data-tab="adv">高级</button>
+  </nav>
+
+  <!-- ══════════ 账号 ══════════ -->
+  <section id="tab-account" class="on">
+    <div class="card">
+      <h2><span class="num">1</span>准备一个 GitHub 令牌（令牌 = 插件访问你仓库的钥匙）</h2>
+      <p class="lead">第一次使用需要你在 GitHub 上生成一个 <b>classic token</b>，勾选 <b>repo</b> 这一项就够了。
+        插件用它在<b>你自己的</b>账号下建私有库、传字体包。</p>
+      <div class="row">
+        <a class="btn" id="linkNewToken" target="_blank" rel="noreferrer">打开 GitHub 建令牌页（已预勾 repo）</a>
+        <a class="btn" href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">管理已有令牌</a>
+      </div>
+      <div class="note warn">
+        <b>建令牌时只要勾 <code>repo</code> 一项</b>（整块，含子项）。不要勾 <code>workflow</code>、<code>admin:org</code>、
+        <code>delete_repo</code> —— 这个插件用不到。<br>
+        页面最上面 <b>Expiration</b> 建议选 <code>No expiration</code> 或 1 年：令牌过期后同步会突然 401，届时回来换一个就行。
+      </div>
+      <div class="note">
+        令牌形如 <code>ghp_xxxxxxxx…</code>，<b>只显示一次</b>，生成后请立刻复制。它等同于密码，别发群里、别提交进仓库。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">2</span>把令牌粘进来</h2>
+      <p>粘贴后点「测试并保存」。插件会用它读一次账号名，确认有效，然后<b>加密</b>存到本机。</p>
+      <div class="row">
+        <input type="password" id="token" placeholder="ghp_… 或 github_pat_…" autocomplete="off" spellcheck="false">
+        <button class="act ghost" id="toggleToken" type="button">显示</button>
+        <button class="act" id="saveToken" type="button">测试并保存</button>
+      </div>
+      <div id="tokenMsg"></div>
+      <div class="accts" id="acctList"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">3</span>这台机器上存了什么</h2>
+      <p>令牌用 <b>Windows DPAPI</b> 加密后写在插件目录的 <code>secret.bin</code>，只有<b>当前 Windows 用户</b>能解开；
+        换台电脑或换 Windows 账号都解不开。DPAPI 不可用时插件<b>不落盘</b>，只在本次运行内有效（会明确提示）。</p>
+      <p>插件的配置文件是明文 <code>config.json</code>（只有账号名、仓库名、同步规则，<b>不含令牌</b>），
+        状态文件 <code>state.json</code>（每族上次同步的哈希）。三个文件都可用「高级」页删除重来。</p>
+    </div>
+  </section>
+
+  <!-- ══════════ 仓库 ══════════ -->
+  <section id="tab-repo">
+    <div class="card">
+      <h2><span class="num">1</span>选一个库（必须是私有仓库）</h2>
+      <p class="lead">字体只会上传到<b>你自己的私有仓库</b>。公开仓库会被插件直接拒绝——宁可不备份，也不把字体摆到公网。</p>
+      <div class="row">
+        <div style="flex:1 1 200px">
+          <label class="f">所有者（留空 = 当前账号本人）</label>
+          <input type="text" id="owner" placeholder="比如 your-name 或某个组织" spellcheck="false">
+        </div>
+        <div style="flex:1 1 200px">
+          <label class="f">仓库名（不存在会帮你建）</label>
+          <input type="text" id="repoName" placeholder="比如 my-fonts" list="recentList" spellcheck="false">
+          <datalist id="recentList"></datalist>
+        </div>
+      </div>
+      <div class="row">
+        <button class="act ghost" id="checkRepo" type="button">检查这个库</button>
+        <button class="act ghost" id="createRepo" type="button">新建私有仓</button>
+        <button class="act" id="saveRepo" type="button">保存</button>
+      </div>
+      <div id="repoMsg"></div>
+      <p class="sub" style="margin-top:10px">换库 = 换远端，<b>首次会全量传一遍</b>；换回原来的库则只传变化的族。</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">2</span>同步规则（一般不用改）</h2>
+      <div class="row" style="align-items:flex-start">
+        <label style="display:flex;gap:8px;align-items:flex-start;flex:1 1 100%">
+          <input type="checkbox" id="excludeUnknown" style="margin-top:4px">
+          <span>不同步<b>「版权未知」</b>的字族（默认开启，建议保持）
+            <span class="sub" style="display:block">判不清授权的字体不上云，是给账号留退路。</span></span>
+        </label>
+      </div>
+      <div class="row">
+        <div>
+          <label class="f">单族上限（MB）</label>
+          <input type="number" id="maxMB" min="8" step="10" style="min-width:120px;flex:0 0 120px">
+        </div>
+        <div>
+          <label class="f">旧版本保留（天）</label>
+          <input type="number" id="keepDays" min="0" step="1" style="min-width:120px;flex:0 0 120px">
+        </div>
+        <button class="act" id="saveRules" type="button" style="align-self:flex-end">保存规则</button>
+      </div>
+      <p class="sub">超上限的族会跳过并报出来；旧包到期才物理删除，留出「另一台机器用旧版覆盖新版」的反悔时间。</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">3</span>试试看</h2>
+      <p>配好之后先<b>预演</b>：只统计要传多少族、多大，不打包不上传。确认数字合理再正式同步。</p>
+      <div class="row">
+        <button class="act ghost" id="dryBtn" type="button">预演一次（不传）</button>
+        <button class="act" id="syncBtn" type="button">立即同步（全部）</button>
+      </div>
+      <div id="runMsg"></div>
+      <p class="sub">进度和结果会以通知的形式出现在 FontManager 主界面。</p>
+    </div>
+  </section>
+
+  <!-- ══════════ 权限 ══════════ -->
+  <section id="tab-perm">
+    <div class="card">
+      <h2>GitHub 令牌要哪几项权限</h2>
+      <p class="lead">一句话：<b>只勾 <code>repo</code> 一项</b>。下表是「为什么需要它」，对应插件真正会发的请求。</p>
+      <table id="permTable">
+        <thead><tr><th style="width:26%">插件要做的事</th><th style="width:30%">调用的接口</th><th style="width:14%">需要权限</th><th>为什么要它</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>不需要、也不会碰的权限</h2>
+      <ul class="plain" id="notNeeded"></ul>
+      <p class="sub" style="margin-top:10px">令牌只保存在本机插件目录，请求只发往 <code>api.github.com</code> 和你填的那个仓库。</p>
+    </div>
+
+    <div class="card">
+      <h2>为什么不用 fine-grained 令牌</h2>
+      <p>fine-grained 令牌必须<b>先指定能访问哪些仓库</b>。而本插件要「首次同步时自动帮你建私有仓」，
+        新建的库不在令牌的授权名单里，建仓和上传都会被拒。classic 令牌的 <code>repo</code> 覆盖你名下所有仓库，才能做到「填个名字就能用」。</p>
+      <p class="sub">如果你已经有一个现成的私有库、只打算往里传，用 fine-grained 也行，但要给它
+        <code>Contents: Read and write</code> + <code>Administration: Read and write</code>（能建 release 才不会卡住）。</p>
+    </div>
+
+    <div class="card">
+      <h2>插件对 FontManager 本体的权限</h2>
+      <table>
+        <thead><tr><th style="width:24%">权限</th><th style="width:30%">用途</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><span class="tag">read:fonts</span></td><td>读字体清单（<code>GET /fonts</code>）</td>
+            <td>要知道本地有哪些字族、每个族在哪个目录，才能按族打包。<b>只读</b>，不改字体、不删文件。</td></tr>
+          <tr><td><span class="tag">/health</span></td><td>启动自检</td><td>确认本地 API 与令牌可用，失败时在日志里说清楚。</td></tr>
+        </tbody>
+      </table>
+      <p class="sub">除此之外不发任何请求给主程序。详细约定见主程序仓库的 <code>docs/PLUGINS.md</code>。</p>
+    </div>
+
+    <div class="card">
+      <h2>实测体检</h2>
+      <p>点下面的按钮，用你现在的令牌真去问一次 GitHub，逐项给出结果。</p>
+      <div class="row"><button class="act" id="probeBtn" type="button">现在体检</button></div>
+      <div id="probeMsg"></div>
+    </div>
+  </section>
+
+  <!-- ══════════ 教程 ══════════ -->
+  <section id="tab-guide">
+    <div class="card">
+      <h2>从零开始：五步配好</h2>
+      <ol class="steps">
+        <li><b>确认插件已启用。</b>FontManager → 设置 → 插件，本插件那一行开关打开；没看到就点「重新扫描」。
+          装在 <code>插件目录\font-sync</code> 这个文件夹里。</li>
+        <li><b>建令牌。</b>点<a href="https://github.com/settings/tokens/new?scopes=repo&amp;description=FontManager%20font-sync" target="_blank" rel="noreferrer">这里</a>
+          打开 GitHub 建令牌页（<code>repo</code> 已预勾）→ 页面底部 <b>Generate token</b> → 复制 <code>ghp_…</code>。
+          <span class="sub" style="display:block">非中文界面路径：Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic)。</span></li>
+        <li><b>存令牌。</b>回到「账号与令牌」页 → 粘贴 → 测试并保存 → 看到「已连接 你的名字」。
+          若提示缺 <code>repo</code>，回 GitHub 给这个令牌补勾。</li>
+        <li><b>选库。</b>「同步到哪个库」页 → 仓库名随便起一个（如 <code>my-fonts</code>），所有者留空 →
+          「新建私有仓」（或直接保存，首次同步自动建）。已有库就填好名字点「检查这个库」，看到绿色「可用」再保存。</li>
+        <li><b>预演，然后同步。</b>「预演一次」看要传多少族 / 多少 MB；数字合理就点「立即同步（全部）」。
+          之后改字体，右键那个字族 →「同步这个字族到 GitHub」即可。</li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h2>第二台电脑 / 重装系统</h2>
+      <ol class="steps">
+        <li>装同一个 FontManager，把 <code>font-sync</code> 插件目录放进去（或用同一份 ZIP）；</li>
+        <li>令牌可以<b>用同一个</b>，也可以<b>另建一个</b>（插件支持存多个账号并在设置里切换）；</li>
+        <li>仓库填<b>同一个</b> <code>所有者/仓库名</code>；</li>
+        <li>首次同步：只传这台机器上「和远端不同」的族，远端已有的不重复传。</li>
+      </ol>
+      <p class="sub">两台机器同时传也不会互相覆盖：每个族的包名带内容哈希，记账提交用「快进否则重试」，冲突会自动重来。</p>
+    </div>
+
+    <div class="card">
+      <h2>常见问题</h2>
+      <details>
+        <summary>点了同步没反应 / 提示「先设置 GitHub 库」</summary>
+        <p>说明还没配好三项之一：账号令牌、仓库名、以及账号是「当前账号」。回本设置页把两页都存一遍；
+          设置页右上角变绿「已就绪」才说明齐了。</p>
+      </details>
+      <details>
+        <summary>提示 403 Resource not accessible</summary>
+        <p>令牌没勾 <code>repo</code>，或者用的是 fine-grained 令牌但没给 <code>Contents</code> / <code>Administration</code> 写权限。
+          换 classic 令牌勾 <code>repo</code> 最省事。</p>
+      </details>
+      <details>
+        <summary>提示「是公开仓库，同步已被禁止」/「能匿名读取」</summary>
+        <p>GitHub 仓库设置 → 最下面 Danger Zone → Change visibility → 改成 Private。插件每次都探一次匿名访问，
+          就是这个原因：字体一旦公开可下，性质就从「个人备份」变成「公开分发」。</p>
+      </details>
+      <details>
+        <summary>提示连不上 GitHub / 超时</summary>
+        <p>插件走系统代理（读 <code>HTTPS_PROXY</code>）。公司网络若拦截 <code>api.github.com</code>，请让代理放行；
+          本地主程序的接口是直连的，不走代理。</p>
+      </details>
+      <details>
+        <summary>同步失败说「本地 API 502」</summary>
+        <p>老版本的代理问题，已在 0.1.1 修掉。仍出现就把 <code>%APPDATA%\FontManager\activation.log</code>
+          里带 <code>[plugin:com.fontmanager.font-sync]</code> 的行发我。</p>
+      </details>
+      <details>
+        <summary>字体传到哪了？会进 git 历史吗？</summary>
+        <p>字体本体只作为 <b>release 附件</b>（<code>lib-0001</code> 这类 release 下的 zip），不进 git。
+          git 里只有 <code>ops/&lt;设备号&gt;/&lt;时间&gt;.json</code> 这种几十 KB 的记账文件。</p>
+      </details>
+      <details>
+        <summary>想彻底重来</summary>
+        <p>「高级」页 → 清空本机配置与令牌。不会动 GitHub 上的任何东西，只是让这台机器回到刚装插件的状态。</p>
+      </details>
+    </div>
+  </section>
+
+  <!-- ══════════ 高级 ══════════ -->
+  <section id="tab-adv">
+    <div class="card">
+      <h2>本机状态</h2>
+      <table>
+        <tbody>
+          <tr><th style="width:30%">当前账号</th><td id="advLogin">—</td></tr>
+          <tr><th>目标仓库</th><td id="advTarget">—</td></tr>
+          <tr><th>设备号</th><td id="advDevice" class="mono">—</td></tr>
+          <tr><th>已同步字族</th><td id="advFamilies">—</td></tr>
+          <tr><th>待删旧包</th><td id="advPending">—</td></tr>
+          <tr><th>上次同步</th><td id="advLast">—</td></tr>
+          <tr><th>插件目录</th><td id="advDir" class="mono">—</td></tr>
+          <tr><th>插件版本</th><td id="advVer">—</td></tr>
+        </tbody>
+      </table>
+      <div class="row">
+        <button class="act ghost" id="openDir" type="button">打开插件目录</button>
+        <button class="act danger" id="resetBtn" type="button">清空本机配置与令牌</button>
+      </div>
+      <div id="advMsg"></div>
+      <p class="sub">「清空」只删本机的 <code>config.json / secret.bin / state.json</code>，
+        不删也不改 GitHub 上的仓库与字体包。</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>字体库同步插件</span>
+    <span id="footVer"></span>
+    <span class="sp"></span>
+    <button class="act ghost" id="closeBtn" type="button">关闭面板</button>
+  </footer>
+</div>
+
+<script>
+(function () {
+  const KEY = new URLSearchParams(location.search).get('k') || '';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  async function api(path, body) {
+    const res = await fetch('/api/' + path, {
+      method: body ? 'POST' : 'GET',
+      headers: { 'X-Panel-Key': KEY, 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) { data = { ok: false, error: '响应解析失败（HTTP ' + res.status + '）' }; }
+    return data;
+  }
+
+  function msg(el, text, kind) {
+    el.innerHTML = text ? '<div class="note ' + (kind || '') + '">' + text + '</div>' : '';
+  }
+
+  function fmtTime(ms) {
+    if (!ms) return '还没有同步过';
+    const d = new Date(ms);
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+      p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  // ── 页签 ────────────────────────────────────────────────
+  const tabs = ['account', 'repo', 'perm', 'guide', 'adv'];
+  function show(tab) {
+    if (tabs.indexOf(tab) < 0) tab = 'account';
+    document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+    tabs.forEach((t) => $('tab-' + t).classList.toggle('on', t === tab));
+    history.replaceState(null, '', '?k=' + encodeURIComponent(KEY) + '&tab=' + tab);
+  }
+  document.querySelectorAll('nav button').forEach((b) => b.onclick = () => show(b.dataset.tab));
+  show(new URLSearchParams(location.search).get('tab') || (location.hash || '').replace('#', '') || 'account');
+
+  // ── 渲染 ────────────────────────────────────────────────
+  let STATE = null;
+
+  function render(st) {
+    STATE = st;
+    const target = st.repoName ? ((st.owner || st.login || '（未选账号）') + '/' + st.repoName) : '还没有选库';
+    $('sub').textContent = (st.login ? '账号 ' + st.login : '还没连接账号') + ' · ' + target;
+    const pill = $('pill');
+    if (st.configured) { pill.className = 'pill ok'; pill.textContent = '已就绪'; }
+    else if (st.login) { pill.className = 'pill warn'; pill.textContent = '还差仓库名'; }
+    else { pill.className = 'pill bad'; pill.textContent = '还没配置'; }
+
+    $('footVer').textContent = st.version ? 'v' + st.version : '';
+
+    // 账号列表
+    const list = $('acctList');
+    if (!st.accounts.length) {
+      list.innerHTML = '<div class="acct"><span class="mask">这台机器上还没有保存任何账号</span></div>';
+    } else {
+      list.innerHTML = st.accounts.map((a) => (
+        '<div class="acct">' +
+          '<span class="who">' + esc(a.login) + '</span>' +
+          (a.current ? '<span class="badge-cur">当前</span>' : '') +
+          '<span class="mask">' + (a.current ? esc(st.tokenMask) : '') + '</span>' +
+          '<span class="sp"></span>' +
+          (a.current ? '' : '<button class="act ghost" data-use="' + esc(a.login) + '">切换</button>') +
+          '<button class="act danger" data-drop="' + esc(a.login) + '">移除</button>' +
+        '</div>'
+      )).join('');
+      list.querySelectorAll('[data-use]').forEach((b) => b.onclick = async () => {
+        const r = await api('account/select', { login: b.dataset.use });
+        if (r.state) render(r.state);
+        msg($('tokenMsg'), '已切换到这个账号。', 'ok');
+      });
+      list.querySelectorAll('[data-drop]').forEach((b) => b.onclick = async () => {
+        if (!confirm('从本机移除 「' + b.dataset.drop + '」 的令牌？（GitHub 上的仓库和字体不受影响）')) return;
+        const r = await api('account/remove', { login: b.dataset.drop });
+        if (r.state) render(r.state);
+        msg($('tokenMsg'), '已移除。', 'ok');
+      });
+    }
+    if (st.login && !st.vaultPersisted) {
+      msg($('tokenMsg'), '这台机器上 DPAPI 不可用，令牌<b>只在本次运行有效</b>（重启软件要重新粘贴）。', 'warn');
+    }
+
+    // 仓库
+    $('owner').value = st.owner || '';
+    $('repoName').value = st.repoName || '';
+    $('recentList').innerHTML = st.recentRepos
+      .map((r) => '<option value="' + esc(r.name) + '">' + esc((r.owner || '自己') + '/' + r.name) + '</option>').join('');
+    $('excludeUnknown').checked = !!st.sync.excludeUnknown;
+    $('maxMB').value = st.sync.maxFamilyMB;
+    $('keepDays').value = st.sync.deleteAfterDays;
+
+    // 权限表
+    const tb = $('permTable').querySelector('tbody');
+    tb.innerHTML = st.permissionTable.map((p) => (
+      '<tr><td>' + esc(p.feature) + '</td><td class="mono">' + esc(p.api) + '</td>' +
+      '<td><span class="tag">' + esc(p.scope) + '</span></td><td>' + esc(p.why) + '</td></tr>'
+    )).join('');
+    $('notNeeded').innerHTML = st.notNeeded.map((t) => '<li>' + esc(t) + '</li>').join('');
+
+    // 高级
+    $('advLogin').textContent = st.login || '未设置';
+    $('advTarget').textContent = st.repoName ? ((st.owner || st.login) + '/' + st.repoName) : '未设置';
+    $('advDevice').textContent = st.deviceId || '—';
+    $('advFamilies').textContent = st.syncedFamilies;
+    $('advPending').textContent = st.pendingDeletes;
+    $('advLast').textContent = fmtTime(st.lastSyncAt);
+    $('advDir').textContent = st.pluginDir;
+    $('advVer').textContent = st.version || '—';
+  }
+
+  async function refresh() {
+    const r = await api('state');
+    if (r.state) render(r.state);
+  }
+
+  // 建令牌直链
+  $('linkNewToken').href = 'https://github.com/settings/tokens/new?scopes=repo&description=FontManager%20font-sync';
+
+  // ── 令牌 ────────────────────────────────────────────────
+  $('toggleToken').onclick = () => {
+    const el = $('token');
+    const show = el.type === 'password';
+    el.type = show ? 'text' : 'password';
+    $('toggleToken').textContent = show ? '隐藏' : '显示';
+  };
+
+  $('saveToken').onclick = async () => {
+    const token = $('token').value.trim();
+    if (!token) { msg($('tokenMsg'), '先把令牌粘贴进来。', 'bad'); return; }
+    const btn = $('saveToken');
+    btn.disabled = true; btn.textContent = '正在连接…';
+    msg($('tokenMsg'), '正在用这个令牌连接 GitHub…');
+    try {
+      const r = await api('account/test', { token: token });
+      if (!r.ok) { msg($('tokenMsg'), '失败：' + esc(r.error || '未知错误'), 'bad'); return; }
+      if (r.state) render(r.state);
+      const caps = r.caps || { items: [] };
+      const rows = (caps.items || []).map((i) => {
+        const mark = i.ok === true ? '<span class="yes">通过</span>'
+          : i.ok === false ? '<span class="no">不通过</span>' : '<span class="unknown">待定</span>';
+        return '<tr><td>' + esc(i.feature) + '</td><td>' + mark + '</td><td>' + esc(i.detail) + '</td></tr>';
+      }).join('');
+      let html = '<div class="note ok"><b>已连接 ' + esc(r.login) + '（' + esc(r.name || r.login) + '）</b>' +
+        (r.persisted ? '，令牌已加密保存。' : '，但 <b>DPAPI 不可用</b>：令牌只在本次运行有效。') + '</div>';
+      html += '<table><thead><tr><th style="width:30%">检查项</th><th style="width:12%">结果</th><th>说明</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody></table>';
+      if (!caps.ok) html += '<div class="note warn">有检查项没通过，先修好再同步（见上面说明）。</div>';
+      msg($('tokenMsg'), html);
+      $('token').value = '';
+    } catch (e) {
+      msg($('tokenMsg'), '失败：' + esc(String(e)), 'bad');
+    } finally {
+      btn.disabled = false; btn.textContent = '测试并保存';
+    }
+  };
+
+  // ── 仓库 ────────────────────────────────────────────────
+  function repoBody() {
+    return { owner: $('owner').value.trim(), repoName: $('repoName').value.trim() };
+  }
+
+  $('checkRepo').onclick = async () => {
+    const b = repoBody();
+    if (!b.repoName) { msg($('repoMsg'), '先填仓库名。', 'bad'); return; }
+    msg($('repoMsg'), '正在问 GitHub…');
+    const r = await api('repo/check', b);
+    const text = (r.message || r.error || '').replace(/\*\*/g, '');
+    msg($('repoMsg'), esc(text), r.ok ? (r.willCreate ? 'warn' : 'ok') : 'bad');
+  };
+
+  $('createRepo').onclick = async () => {
+    const b = repoBody();
+    if (!b.repoName) { msg($('repoMsg'), '先填仓库名。', 'bad'); return; }
+    msg($('repoMsg'), '正在创建私有仓…');
+    const r = await api('repo/create', b);
+    msg($('repoMsg'), esc((r.message || r.error || '').replace(/\*\*/g, '')), r.ok ? 'ok' : 'bad');
+    if (r.state) render(r.state);
+  };
+
+  async function saveRepo() {
+    const b = repoBody();
+    if (!b.repoName) { msg($('repoMsg'), '仓库名不能空。', 'bad'); return false; }
+    const r = await api('save', Object.assign(b, {
+      excludeUnknown: $('excludeUnknown').checked,
+      maxFamilyMB: $('maxMB').value,
+      deleteAfterDays: $('keepDays').value,
+    }));
+    msg($('repoMsg'), r.ok ? '已保存。现在可以去下面「预演一次」。' : esc(r.error || '保存失败'),
+      r.ok ? 'ok' : 'bad');
+    if (r.state) render(r.state);
+    return r.ok;
+  }
+  $('saveRepo').onclick = saveRepo;
+  $('saveRules').onclick = saveRepo;
+
+  $('dryBtn').onclick = async () => {
+    if (!STATE || !STATE.configured) { msg($('repoMsg'), '先把账号和仓库都保存好。', 'bad'); show('account'); return; }
+    const r = await api('dryrun');
+    msg($('runMsg'), r.ok ? '预演已开始 —— 数分钟后看 FontManager 的通知。' : esc(r.error), r.ok ? 'ok' : 'bad');
+  };
+
+  $('syncBtn').onclick = async () => {
+    if (!STATE || !STATE.configured) { msg($('repoMsg'), '先把账号和仓库都保存好。', 'bad'); show('account'); return; }
+    if (!confirm('开始正式同步？会把变化的字族上传到 ' + ($('owner').value || STATE.login) + '/' + $('repoName').value)) return;
+    const r = await api('sync');
+    msg($('runMsg'), r.ok ? '同步已开始 —— 进度看 FontManager 的通知。' : esc(r.error), r.ok ? 'ok' : 'bad');
+  };
+
+  // ── 体检 ────────────────────────────────────────────────
+  $('probeBtn').onclick = async () => {
+    msg($('probeMsg'), '正在逐项问 GitHub…');
+    const r = await api('account/probe', {});
+    if (!r.ok && r.error) { msg($('probeMsg'), esc(r.error), 'bad'); return; }
+    const items = (r.caps && r.caps.items) || [];
+    const flags = (r.caps && r.caps.flags) || {};
+    let html = '';
+    if (flags.known) {
+      html += '<div class="note">令牌 scopes：<code>' + esc((flags.scopes || []).join(', ') || '(无)') + '</code></div>';
+    } else {
+      html += '<div class="note warn">这个令牌没有返回 scopes（fine-grained 令牌的正常现象），写权限只能等第一次同步验证。</div>';
+    }
+    html += '<table><thead><tr><th style="width:30%">检查项</th><th style="width:12%">结果</th><th>说明</th></tr></thead><tbody>' +
+      items.map((i) => '<tr><td>' + esc(i.feature) + '</td><td>' +
+        (i.ok === true ? '<span class="yes">通过</span>' : i.ok === false ? '<span class="no">不通过</span>'
+          : '<span class="unknown">待定</span>') +
+        '</td><td>' + esc(i.detail) + '</td></tr>').join('') + '</tbody></table>';
+    msg($('probeMsg'), html);
+  };
+
+  // ── 高级 ────────────────────────────────────────────────
+  $('openDir').onclick = () => api('open_dir', {});
+  $('resetBtn').onclick = async () => {
+    if (!confirm('清空本机的账号令牌与同步设置？（不动 GitHub 上的仓库和字体包）')) return;
+    const r = await api('reset', {});
+    if (r.state) render(r.state);
+    msg($('advMsg'), '已清空，插件回到刚装好的状态。', 'ok');
+  };
+  $('closeBtn').onclick = async () => {
+    await api('close', {});
+    document.body.innerHTML = '<div class="wrap"><div class="card"><h2>面板已关闭</h2>' +
+      '<p>需要时回 FontManager 重新打开「设置 GitHub 库…」。</p></div></div>';
+  };
+
+  refresh();
+})();
+</script>
+</body>
+</html>

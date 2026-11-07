@@ -23,7 +23,10 @@ import os
 import time
 import uuid
 
-PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 插件的三个状态文件就在插件目录里（和 main.py 同级）。
+# 注意别写成 dirname(dirname(...))：那会跑到 plugins/ 上一层，等于把配置丢在
+# 所有插件的公共目录里 —— 0.1.1 踩过，config.json 直接写到了 plugins\ 下。
+PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(PLUGIN_DIR, "config.json")
 SECRET_PATH = os.path.join(PLUGIN_DIR, "secret.bin")
 STATE_PATH = os.path.join(PLUGIN_DIR, "state.json")
