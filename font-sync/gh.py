@@ -313,15 +313,26 @@ class Gh:
                 raise
 
     def download_asset(self, owner, name, asset_id, dest_path, chunk=1 << 20):
-        """下载 asset：先拿 302，再**不带令牌**跟随。"""
+        """下载 asset：先拿 302，再**不带令牌**跟随。
+
+        坑：`_NoRedirect` 把 redirect_request 置空之后，urllib 认为「这个跳转处理不了」，
+        于是**抛 HTTPError(302)** 而不是返回响应 —— 必须从异常里读 Location。
+        """
         req = urllib.request.Request(
             f"{API}/repos/{owner}/{name}/releases/assets/{asset_id}",
             headers={"Accept": "application/octet-stream", "User-Agent": UA,
                      "Authorization": f"Bearer {self.token}"},
         )
         opener = urllib.request.build_opener(_NoRedirect)
-        with opener.open(req, timeout=self.timeout) as resp:
-            location = resp.headers.get("Location")
+        location = ""
+        try:
+            with opener.open(req, timeout=self.timeout) as resp:
+                location = resp.headers.get("Location") or ""
+        except urllib.error.HTTPError as e:
+            if e.code in (301, 302, 303, 307, 308):
+                location = e.headers.get("Location") or ""
+            else:
+                raise GhError(e.code, _error_text(e.read()[:500])) from None
         if not location:
             raise GhError(0, "下载没有拿到 302 跳转")
         req2 = urllib.request.Request(location, headers={"User-Agent": UA})

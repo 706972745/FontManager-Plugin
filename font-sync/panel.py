@@ -45,6 +45,10 @@ PERMISSION_TABLE = [
      "scope": "repo", "why": "记录哪台机器在什么时候传了哪些字族"},
     {"feature": "删旧版本 asset", "api": "DELETE /releases/assets/*",
      "scope": "repo", "why": "只删本插件自己上传的旧包，保留天数可在高级里调"},
+    {"feature": "下载字体包（新机器恢复）", "api": "GET /releases/assets/*（下载时跳到 objects）",
+     "scope": "repo", "why": "「下载回本机」要读私有仓的 release，匿名拿不到"},
+    {"feature": "让 FontManager 重新扫描字体库", "api": "POST /api/v1/fonts/scan（本地 API）",
+     "scope": "write:fonts", "why": "下载回来的字体要让界面立刻看见，不用你手动点一次重新扫描"},
 ]
 
 NOT_NEEDED = [
@@ -82,6 +86,10 @@ def _save_sync_rules(data, owner="", name=""):
                  "deleteAfterDays": days,
                  "deleteRemovedFamilies": bool(data.get("deleteRemoved", True))},
     }
+    if "restoreDir" in data:
+        patch["restoreDir"] = str(data.get("restoreDir") or "").strip()
+    if "overwriteExisting" in data:
+        patch["overwriteExisting"] = bool(data.get("overwriteExisting"))
     store.save_config(patch)
     if name:
         store.remember_repo(owner or store.current_account()[0], name)
@@ -121,6 +129,13 @@ def snapshot():
         "syncedFamilies": len(st.get("families") or {}),
         "pendingDeletes": len(st.get("pendingDeletes") or []),
         "lastSyncAt": st.get("lastSyncAt") or 0,
+        "lastRestoreAt": st.get("lastRestoreAt") or 0,
+        "restore": {
+            "dir": cfg.get("restoreDir") or "",
+            # 自动推断出来的目标目录：只在 UI 上显示，让用户知道文件会落到哪
+            "resolvedDir": syncer.read_app_library_dir(),
+            "overwriteExisting": bool(cfg.get("overwriteExisting")),
+        },
         "pluginDir": store.PLUGIN_DIR,
         "permissionTable": PERMISSION_TABLE,
         "notNeeded": NOT_NEEDED,
@@ -291,8 +306,35 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "state": snapshot()})
             if parsed.path == "/api/progress":
                 return self._json({"ok": True, "progress": self.panel.progress()})
+            if parsed.path == "/api/restore/info":
+                return self._json(self._restore_info())
             return self._json({"ok": False, "error": "unknown endpoint"}, 404)
         return self._json({"ok": False, "error": "not found"}, 404)
+
+    # -- 恢复：远端有什么 --
+    def _restore_info(self):
+        """列出远端所有字体族。慢（要翻 release 的 asset），页面只在用户点按钮时调。"""
+        login, token = store.current_account()
+        if not login or not token:
+            return {"ok": False, "error": "先到「账号与令牌」页保存一个账号"}
+        cfg = store.load_config()
+        name = (cfg.get("repoName") or "").strip()
+        if not name:
+            return {"ok": False, "error": "还没设置仓库：先到「仓库」页选一个库"}
+        owner = (cfg.get("owner") or login).strip()
+        client = ghmod.Gh(token)
+        try:
+            rows = syncer.list_remote(client, owner, name, log=lambda *_a: None)
+        except Exception as e:
+            return {"ok": False, "error": f"读不到 {owner}/{name}：{e}"}
+        total = sum(r["size"] for r in rows)
+        st = store.load_state()
+        synced = {str(k).lower() for k in (st.get("families") or {})}
+        for row in rows:
+            row["synced"] = row["slug"].lower() in synced
+        return {"ok": True, "owner": owner, "name": name, "count": len(rows),
+                "bytes": total, "families": rows[:2000],
+                "target": cfg.get("restoreDir") or syncer.read_app_library_dir()}
 
     # -- POST --
     def do_POST(self):
@@ -452,6 +494,31 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "error": "这个动作需要从插件菜单触发"})
             fn()
             return self._json({"ok": True, "message": "同步已开始，进度看 FontManager 的通知"})
+
+        if path == "/api/restore/config":
+            patch = {}
+            if "restoreDir" in data:
+                patch["restoreDir"] = str(data.get("restoreDir") or "").strip()
+            if "overwriteExisting" in data:
+                patch["overwriteExisting"] = bool(data.get("overwriteExisting"))
+            if not patch:
+                return self._json({"ok": False, "error": "没有要保存的字段"})
+            store.save_config(patch)
+            return self._json({"ok": True, "state": snapshot()})
+
+        if path == "/api/restore/dry":
+            fn = self.panel.actions.get("restoreDry")
+            if not fn:
+                return self._json({"ok": False, "error": "这个动作需要从插件菜单触发"})
+            fn()
+            return self._json({"ok": True, "message": "预演下载已开始，进度见下方进度条"})
+
+        if path == "/api/restore":
+            fn = self.panel.actions.get("restore")
+            if not fn:
+                return self._json({"ok": False, "error": "这个动作需要从插件菜单触发"})
+            fn()
+            return self._json({"ok": True, "message": "恢复已开始，进度见下方进度条"})
 
         # ── 杂项 ──────────────────────────────────────────────
         if path == "/api/open_dir":

@@ -208,6 +208,7 @@
   <nav id="nav">
     <button data-tab="account" class="on">账号与令牌</button>
     <button data-tab="repo">同步到哪个库</button>
+    <button data-tab="restore">下载回本机</button>
     <button data-tab="perm">权限说明</button>
     <button data-tab="guide">新手教程</button>
     <button data-tab="adv">高级</button>
@@ -360,6 +361,46 @@
       </div>
       <div id="runMsg"></div>
       <p class="sub">进度和结果会以通知的形式出现在 FontManager 主界面。</p>
+    </div>
+  </section>
+
+  <!-- ══════════ 下载回本机 ══════════ -->
+  <section id="tab-restore">
+    <div class="card">
+      <h2><span class="num">1</span>另一台电脑怎么把字体拿回来</h2>
+      <p class="lead">上传的是<b>字体文件本体</b>（原文件字节，一个不改，外加同目录的授权/说明文档），
+        不是截图也不是链接。所以在<b>任何一台</b>装了 FontManager + 这个插件、并按上面两步配好<b>同一个库</b>的电脑上，
+        点一下就能把字体下载回这台电脑的字体库，然后自动重新扫描 —— 界面上就能看到这些字族。</p>
+      <div class="note warn">这个动作是<b>往本机字体库里写文件</b>。默认<b>不覆盖</b>本机已有的同名文件（内容不同会单独列出来），
+        要覆盖请自己勾下面的开关。</div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">2</span>下载到哪里</h2>
+      <p class="sub">留空 = 用 FontManager 当前的字体库目录（推荐）。填了别的目录就会往那里写。</p>
+      <div class="row">
+        <input type="text" id="restoreDirInput" placeholder="留空 = FontManager 当前字体库" spellcheck="false" style="flex:1 1 320px">
+        <button class="act ghost" id="restoreSaveDir" type="button">保存目录</button>
+      </div>
+      <div class="note" id="restoreTarget">正在读取…</div>
+      <label class="f" style="margin-top:10px;display:block">
+        <input type="checkbox" id="restoreOverwrite"> 覆盖本机同名文件（内容不同也覆盖 —— 谨慎）
+      </label>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">3</span>看看远端有什么，再决定</h2>
+      <div class="row">
+        <button class="act ghost" id="restoreRefresh" type="button">刷新远端内容</button>
+        <button class="act ghost" id="restoreDryBtn" type="button">预演下载（不下载）</button>
+        <button class="act" id="restoreBtn" type="button">开始下载到本机</button>
+      </div>
+      <div id="restoreMsg"></div>
+      <div class="prog" id="restoreProgBox">
+        <div class="bar"><i id="restoreBar"></i></div>
+        <div class="txt" id="restoreText"></div>
+      </div>
+      <div id="restoreList"></div>
     </div>
   </section>
 
@@ -575,7 +616,7 @@
   }
 
   // ── 页签 ────────────────────────────────────────────────
-  const tabs = ['account', 'repo', 'perm', 'guide', 'adv'];
+  const tabs = ['account', 'repo', 'restore', 'perm', 'guide', 'adv'];
   function show(tab) {
     if (tabs.indexOf(tab) < 0) tab = 'account';
     document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
@@ -661,6 +702,18 @@
       '<td><span class="tag">' + esc(p.scope) + '</span></td><td>' + esc(p.why) + '</td></tr>'
     )).join('');
     $('notNeeded').innerHTML = st.notNeeded.map((t) => '<li>' + esc(t) + '</li>').join('');
+
+    // 下载回本机
+    const rs = st.restore || {};
+    $('restoreDirInput').value = rs.dir || '';
+    $('restoreOverwrite').checked = !!rs.overwriteExisting;
+    const tgt = rs.dir || rs.resolvedDir || '';
+    const tgtEl = $('restoreTarget');
+    tgtEl.className = 'note ' + (tgt ? 'ok' : 'warn');
+    tgtEl.innerHTML = tgt
+      ? '字体会写到这里：<b class="mono">' + esc(tgt) + '</b>' +
+        (rs.dir ? '（这里指定的）' : '（FontManager 当前字体库）')
+      : '还没确认字体库在哪 —— 先在 FontManager 的「设置」里选一个字体库，或者在上面手填一个目录。';
 
     // 高级
     $('advLogin').textContent = st.login || '未设置';
@@ -880,6 +933,77 @@
   $('saveRepo').onclick = saveRepo;
   $('saveRules').onclick = saveRepo;
 
+  // ── 下载回本机 ──────────────────────────────────────────
+  let RESTORE = null;
+
+  function renderRestoreList(info) {
+    const box = $('restoreList');
+    if (!info || !info.count) {
+      box.innerHTML = '<div class="note">远端还没有字体包。先在「高级」页点「立即同步（全部）」，把字体传上去。</div>';
+      return;
+    }
+    const rows = info.families.slice(0, 200).map((r) => (
+      '<div class="acct">' +
+        '<span class="who">' + esc(r.slug) + '</span>' +
+        (r.synced ? '<span class="badge-cur">本机有记录</span>' : '') +
+        '<span class="mask">' + mb(r.size) + ' · ' + esc(r.tag || '') + '</span>' +
+      '</div>'
+    )).join('');
+    const more = info.count > 200 ? '<p class="sub">只列前 200 个，实际共 ' + info.count + ' 个。</p>' : '';
+    box.innerHTML = '<p class="sub" style="margin-top:12px">远端共 <b>' + info.count + '</b> 个族 / <b>' +
+      mb(info.bytes) + '</b>：</p>' + rows + more;
+  }
+
+  async function loadRestoreInfo() {
+    msg($('restoreMsg'), '正在读远端内容（要翻 release 里的 asset，几百个族可能要几秒）…');
+    const r = await api('restore/info');
+    if (!r.ok) { msg($('restoreMsg'), '读不到：' + esc(r.error || '未知错误'), 'bad'); return; }
+    RESTORE = r;
+    renderRestoreList(r);
+    msg($('restoreMsg'), '远端 ' + r.count + ' 个族 / ' + mb(r.bytes) +
+      (r.target ? '，会下载到 <b class="mono">' + esc(r.target) + '</b>' : '，还没确定下载目录'), 'ok');
+  }
+
+  $('restoreRefresh').onclick = loadRestoreInfo;
+
+  async function saveRestoreConfig() {
+    const r = await api('restore/config', {
+      restoreDir: $('restoreDirInput').value.trim(),
+      overwriteExisting: $('restoreOverwrite').checked,
+    });
+    if (r.state) render(r.state);
+    msg($('restoreMsg'), r.ok ? '已保存。' : '保存失败：' + esc(r.error || ''), r.ok ? 'ok' : 'bad');
+    return r.ok;
+  }
+  $('restoreSaveDir').onclick = saveRestoreConfig;
+  $('restoreOverwrite').onchange = saveRestoreConfig;
+
+  function needConfigured() {
+    if (STATE && STATE.configured) return true;
+    msg($('restoreMsg'), '还差一步：先在「账号与令牌」保存令牌，再到「同步到哪个库」选好库。', 'bad');
+    show('account');
+    return false;
+  }
+
+  $('restoreDryBtn').onclick = async () => {
+    if (!needConfigured()) return;
+    const r = await api('restore/dry', {});
+    msg($('restoreMsg'), r.ok ? '已开始预演 —— 进度在下面实时更新。' : esc(r.error || '触发失败'),
+        r.ok ? 'ok' : 'bad');
+    if (r.ok) startPolling();
+  };
+
+  $('restoreBtn').onclick = async () => {
+    if (!needConfigured()) return;
+    const tgt = (STATE.restore && (STATE.restore.dir || STATE.restore.resolvedDir)) || '';
+    if (!tgt) { msg($('restoreMsg'), '还不知道要下载到哪里：先在上面填一个目录并保存。', 'bad'); return; }
+    if (!confirm('把远端字体下载到：\n' + tgt + '\n\n会往这个目录里写文件（默认不覆盖已有的同名文件）。继续？')) return;
+    const r = await api('restore', {});
+    msg($('restoreMsg'), r.ok ? '已开始下载 —— 进度在下面实时更新。' : esc(r.error || '触发失败'),
+        r.ok ? 'ok' : 'bad');
+    if (r.ok) startPolling();
+  };
+
   // ── 进度 ────────────────────────────────────────────────
   let pollTimer = null;
 
@@ -897,6 +1021,12 @@
       case 'upload': return '已处理 <b>' + p.done + '/' + total + '</b> · <b>' + mb(p.bytes) +
         '</b> / ' + mb(p.bytesTotal) + ' · 刚完成 <b>' + esc(p.family || '') + '</b>';
       case 'delete': return '删除远端已删字族 <b>' + p.done + '/' + total + '</b>：' + esc(p.family || '');
+      case 'restore-scan': return '正在读本机字体清单…';
+      case 'restore-plan': return '正在比对远端与本机（' + (p.message || ('计划 ' + total + ' 个族')) + '）…';
+      case 'download': return '已下载 <b>' + p.done + '/' + total + '</b> · <b>' + mb(p.bytes) +
+        '</b> / ' + mb(p.bytesTotal) + ' · 正在拉 <b>' + esc(p.family || '') + '</b>';
+      case 'unpack': return '写入本机 <b>' + esc(p.family || '') + '</b>（' + p.done + '/' + total + '）';
+      case 'rescan': return '正在让 FontManager 重新扫描字体库…';
       case 'failed': return '失败跳过 <b>' + esc(p.family || '') + '</b>：' + esc(p.message || '') +
         '（已处理 ' + p.done + '/' + total + '）';
       case 'done': return '<b>' + esc(p.message || '完成') + '</b>';
@@ -906,13 +1036,21 @@
   }
 
   function renderProgress(p) {
-    const box = $('progressBox');
+    const restore = !!(p && p.phase && (
+      p.phase.indexOf('restore-') === 0 ||
+      p.phase === 'download' || p.phase === 'unpack' || p.phase === 'rescan'));
+    const box = restore ? $('restoreProgBox') : $('progressBox');
+    const bar = restore ? $('restoreBar') : $('progBar');
+    const txt = restore ? $('restoreText') : $('progText');
+    // 另一条进度条先清掉，免得同时亮着两条
+    if (restore) $('progressBox').className = 'prog';
+    else $('restoreProgBox').className = 'prog';
     if (!p || !p.phase || p.phase === 'idle') { box.className = 'prog'; return; }
     box.className = 'prog on' + (p.phase === 'error' ? ' err' : p.phase === 'done' ? ' ok' : '');
     const pct = p.phase === 'done' ? 100
       : (p.total ? Math.min(100, Math.round((p.done / p.total) * 100)) : 4);
-    $('progBar').style.width = pct + '%';
-    $('progText').innerHTML = phaseText(p);
+    bar.style.width = pct + '%';
+    txt.innerHTML = phaseText(p);
   }
 
   function stopPolling() {

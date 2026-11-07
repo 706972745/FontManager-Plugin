@@ -82,7 +82,7 @@ class PackerTests(unittest.TestCase):
             meta = packer.pack_family(os.path.join(d, "x.zip"), list(files.values()))
             import zipfile
             with zipfile.ZipFile(os.path.join(d, "x.zip")) as zf:
-                names = zf.namelist()
+                names = [n for n in zf.namelist() if n != packer.MANIFEST]
             self.assertEqual(len(names), 2, "同名文件不能互相覆盖")
             self.assertEqual(len(set(names)), 2)
 
@@ -791,10 +791,15 @@ class PanelTests(unittest.TestCase):
         rows = self.panel_mod.PERMISSION_TABLE
         scopes = {r["scope"] for r in rows}
         self.assertIn("repo", scopes, "建仓/上传/记账都必须写明要 repo")
-        writes = [r for r in rows if r["api"].startswith(("POST", "PATCH", "DELETE"))]
+        writes = [r for r in rows if r["api"].startswith(("POST", "PATCH", "DELETE"))
+                  and "本地 API" not in r["api"]]
         self.assertTrue(writes)
         for r in writes:
             self.assertEqual(r["scope"], "repo", f"{r['api']} 是写操作，scope 必须写清楚")
+        local = [r for r in rows if "本地 API" in r["api"]]
+        self.assertTrue(local, "恢复后要让主程序重扫，这条本地 API 权限必须写出来")
+        for r in local:
+            self.assertEqual(r["scope"], "write:fonts")
 
     def test_scope_flags_distinguish_classic_and_fine_grained(self):
         flags = self.panel_mod._scope_flags(["repo", "read:user"])
@@ -968,7 +973,7 @@ class PanelTests(unittest.TestCase):
         import re
         from pathlib import Path
         html = (Path(HERE) / "panel.html").read_text(encoding="utf-8")
-        read_only = ("state", "progress")
+        read_only = ("state", "progress", "restore/info")
         bad = []
         for m in re.finditer(r"api\('([^']+)'\s*([,)])", html):
             name, tail = m.group(1), m.group(2)
@@ -985,10 +990,281 @@ class PanelTests(unittest.TestCase):
         ids = set(re.findall(r'\bid="([^"]+)"', html))
         refs = set(re.findall(r"\$\('([^']+)'\)", html))
         self.assertEqual(sorted(refs - ids), [], "JS 引用了不存在的元素 id")
-        for tab in ("account", "repo", "perm", "guide", "adv"):
+        for tab in ("account", "repo", "restore", "perm", "guide", "adv"):
             self.assertIn(f'id="tab-{tab}"', html)
         self.assertIn("settings/tokens/new?scopes=repo", html,
                       "教程里必须给「已预勾 repo」的建令牌直链")
+
+
+class SystemFontTests(unittest.TestCase):
+    """Windows 自带字体绝不能进同步范围：不可再分发，也不属于字体库。"""
+
+    def test_system_faces_are_excluded(self):
+        faces = [
+            {"path": r"C:\Windows\Fonts\arial.ttf", "family": "Arial", "source": "system"},
+            {"path": r"L:\库\MyFont\b.ttf", "family": "MyFont", "source": "managed"},
+        ]
+        groups = syncer.group_by_family(faces)
+        self.assertEqual(list(groups), ["MyFont"])
+
+    def test_missing_source_field_still_works(self):
+        """老版本 API 不返回 source，不能因此把整个同步变成空操作。"""
+        faces = [{"path": r"L:\库\X\a.ttf", "family": "X"}]
+        self.assertEqual(list(syncer.group_by_family(faces)), ["X"])
+
+
+class AssetNameTests(unittest.TestCase):
+    def test_parses_our_asset_names(self):
+        slug, digest = packer.parse_asset_name("Source_Han_Sans__0123456789ab.zip")
+        self.assertEqual(slug, "Source_Han_Sans")
+        self.assertEqual(digest, "0123456789ab")
+
+    def test_rejects_foreign_files(self):
+        for name in ("manifest.json", "abc.zip", "abc__short.zip",
+                     "abc__zzzzzzzzzzzz.zip", ""):
+            self.assertEqual(packer.parse_asset_name(name), (None, None), name)
+
+
+class ManifestTests(unittest.TestCase):
+    def test_manifest_carries_real_family_name(self):
+        with tempfile.TemporaryDirectory() as d:
+            files = make_tree(d, {"a/思源黑体 SC.otf": 512})
+            zip_path = os.path.join(d, "x.zip")
+            packer.pack_family(zip_path, [files["a/思源黑体 SC.otf"]],
+                               family="思源黑体 SC / Source Han Sans SC")
+            manifest = packer.read_manifest(zip_path)
+            self.assertEqual(manifest["family"], "思源黑体 SC / Source Han Sans SC")
+            self.assertEqual([f["name"] for f in manifest["fonts"]], ["思源黑体 SC.otf"])
+            self.assertEqual(len(manifest["fonts"][0]["sha256"]), 64)
+
+    def test_manifest_is_deterministic(self):
+        """同内容同族名 → 字节相同。清单里放时间戳会立刻毁掉跨机幂等。"""
+        with tempfile.TemporaryDirectory() as d:
+            files = make_tree(d, {"a/T.ttf": 1024})
+            p = files["a/T.ttf"]
+            m1 = packer.pack_family(os.path.join(d, "1.zip"), [p], family="F")
+            m2 = packer.pack_family(os.path.join(d, "2.zip"), [p], family="F")
+            self.assertEqual(m1["hash"], m2["hash"])
+            m3 = packer.pack_family(os.path.join(d, "3.zip"), [p], family="G")
+            self.assertNotEqual(m1["hash"], m3["hash"], "族名进了清单，改名就该变哈希")
+
+    def test_old_package_without_manifest_reads_as_none(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "old.zip")
+            with zipfile.ZipFile(path, "w") as zf:
+                zf.writestr("T.ttf", b"x" * 32)
+            self.assertIsNone(packer.read_manifest(path))
+
+
+class UnpackTests(unittest.TestCase):
+    def test_round_trip_restores_identical_bytes(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = make_tree(os.path.join(d, "src"), {"a/T.ttf": 2048, "a/OFL.txt": 128})
+            zip_path = os.path.join(d, "x.zip")
+            packer.pack_family(zip_path, [src["a/T.ttf"]], docs=[src["a/OFL.txt"]],
+                               family="F")
+            out = os.path.join(d, "out")
+            res = packer.unpack_family(zip_path, out)
+            self.assertEqual(len(res["fonts"]), 1)
+            self.assertTrue(os.path.exists(os.path.join(out, "T.ttf")))
+            self.assertTrue(os.path.exists(os.path.join(out, "docs", "OFL.txt")))
+            with open(os.path.join(out, "T.ttf"), "rb") as fh:
+                with open(src["a/T.ttf"], "rb") as orig:
+                    self.assertEqual(fh.read(), orig.read(), "字体字节必须一模一样")
+
+    def test_same_file_is_skipped_not_rewritten(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = make_tree(os.path.join(d, "src"), {"a/T.ttf": 512})
+            zip_path = os.path.join(d, "x.zip")
+            packer.pack_family(zip_path, [src["a/T.ttf"]], family="F")
+            out = os.path.join(d, "out")
+            packer.unpack_family(zip_path, out)
+            again = packer.unpack_family(zip_path, out)
+            self.assertEqual(again["fonts"], [], "第二次恢复不该重复写盘")
+            self.assertEqual(len(again["skipped"]), 1)
+
+    def test_different_file_is_never_overwritten_by_default(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = make_tree(os.path.join(d, "src"), {"a/T.ttf": 512})
+            zip_path = os.path.join(d, "x.zip")
+            packer.pack_family(zip_path, [src["a/T.ttf"]], family="F")
+            out = os.path.join(d, "out")
+            os.makedirs(out)
+            with open(os.path.join(out, "T.ttf"), "wb") as fh:
+                fh.write(b"local version")
+            res = packer.unpack_family(zip_path, out)
+            self.assertEqual(len(res["conflicts"]), 1)
+            with open(os.path.join(out, "T.ttf"), "rb") as fh:
+                self.assertEqual(fh.read(), b"local version", "没勾覆盖就不能动本地文件")
+
+    def test_path_traversal_is_rejected(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "evil.zip")
+            with zipfile.ZipFile(path, "w") as zf:
+                zf.writestr("../evil.ttf", b"x")
+            out = os.path.join(d, "out")
+            packer.unpack_family(path, out)
+            self.assertFalse(os.path.exists(os.path.join(d, "evil.ttf")))
+
+    def test_dangerous_family_name_becomes_safe_dir(self):
+        self.assertNotIn("/", syncer._safe_dirname("A/B"))
+        self.assertNotIn(":", syncer._safe_dirname("C:\\x"))
+        self.assertEqual(syncer._safe_dirname("  "), "family")
+
+
+class FakeRestoreGh:
+    """远端：按 asset 名发 zip。只实现 run_restore 用得到的方法。"""
+
+    def __init__(self, packages, private=True, readable=False):
+        self.packages = packages  # [{"name":..., "blob": bytes}]
+        self.state = {"exists": True, "private": private, "anonymousReadable": readable,
+                      "defaultBranch": "main", "empty": False}
+
+    def whoami(self):
+        return {"login": "me"}
+
+    def repo_state(self, owner, name):
+        return dict(self.state)
+
+    def list_releases_simple(self, owner, name):
+        return [{"id": 7, "tag_name": "lib-0001"}]
+
+    def list_assets(self, owner, name, release_id):
+        return [{"id": i + 1, "name": p["name"], "size": len(p["blob"]),
+                 "created_at": f"2026-01-0{i+1}T00:00:00Z"}
+                for i, p in enumerate(self.packages)]
+
+    def download_asset(self, owner, name, asset_id, dest_path, chunk=1 << 20):
+        blob = self.packages[int(asset_id) - 1]["blob"]
+        with open(dest_path, "wb") as fh:
+            fh.write(blob)
+        return len(blob)
+
+
+class FakeScanApi(FakeApi):
+    def __init__(self, faces):
+        super().__init__(faces)
+        self.posts = []
+
+    def post(self, path, body=None):
+        self.posts.append(path)
+        return {"ok": True}
+
+
+class RestoreTests(unittest.TestCase):
+    """新机器恢复：远端有、本机没有 → 下载解压、记账、让主程序重扫。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old = (store.STATE_PATH, store.CONFIG_PATH, store.SECRET_PATH)
+        store.STATE_PATH = os.path.join(self.tmp.name, "state.json")
+        store.CONFIG_PATH = os.path.join(self.tmp.name, "config.json")
+        store.SECRET_PATH = os.path.join(self.tmp.name, "secret.bin")
+        store._reset_cache()
+        self.lib = os.path.join(self.tmp.name, "library")
+        os.makedirs(self.lib)
+        self.cfg = {"owner": "me", "repoName": "fonts", "restoreDir": self.lib}
+
+    def tearDown(self):
+        (store.STATE_PATH, store.CONFIG_PATH, store.SECRET_PATH) = self.old
+        store._reset_cache()
+        self.tmp.cleanup()
+
+    def _package(self, family, size=1024):
+        src = make_tree(os.path.join(self.tmp.name, "src_" + str(len(family))),
+                        {f"{packer.slugify(family)}/T{len(family)}.ttf": size})
+        path = os.path.join(self.tmp.name, f"p{len(family)}.zip")
+        meta = packer.pack_family(path, list(src.values()), family=family)
+        with open(path, "rb") as fh:
+            blob = fh.read()
+        return {"name": packer.asset_name(family, meta),
+                "blob": blob, "family": family}
+
+    def test_new_machine_downloads_and_writes_fonts(self):
+        pkg = self._package("思源黑体 SC")
+        api = FakeScanApi([])
+        st = {"deviceId": "dev2", "repo": "", "families": {}, "pendingDeletes": []}
+        summary = syncer.run_restore(FakeRestoreGh([pkg]), api, self.cfg, st,
+                                     log=lambda *_: None)
+        self.assertEqual(summary["downloaded"], 1)
+        self.assertEqual(summary["failed"], [])
+        written = os.path.join(self.lib, "思源黑体 SC", "T7.ttf")
+        self.assertTrue(os.path.exists(written), "字体文件必须落到字体库里")
+        self.assertIn("/fonts/scan", api.posts, "写完必须让主程序重扫，否则界面看不到")
+        rec = st["families"]["思源黑体 SC"]
+        self.assertEqual(len(rec["hash"]), 64, "恢复时要记完整哈希，下次同步才不会重传")
+        self.assertTrue(rec.get("fromRemote"))
+
+    def test_family_already_local_is_skipped(self):
+        pkg = self._package("Arial")
+        api = FakeScanApi([{"path": os.path.join(self.lib, "Arial", "a.ttf"),
+                            "family": "Arial"}])
+        st = {"deviceId": "dev1", "repo": "", "families": {}, "pendingDeletes": []}
+        summary = syncer.run_restore(FakeRestoreGh([pkg]), api, self.cfg, st,
+                                     log=lambda *_: None)
+        self.assertEqual(summary["planned"], 0)
+        self.assertEqual(summary["downloaded"], 0)
+        self.assertEqual(summary["skipped"], 1)
+
+    def test_overwrite_setting_pulls_it_again(self):
+        pkg = self._package("Arial")
+        api = FakeScanApi([{"path": os.path.join(self.lib, "Arial", "a.ttf"),
+                            "family": "Arial"}])
+        st = {"deviceId": "dev1", "repo": "", "families": {}, "pendingDeletes": []}
+        summary = syncer.run_restore(FakeRestoreGh([pkg]), api, self.cfg, st,
+                                     overwrite=True, log=lambda *_: None)
+        self.assertEqual(summary["downloaded"], 1)
+
+    def test_corrupted_download_is_refused(self):
+        pkg = self._package("Broken")
+        pkg["blob"] = b"not the real zip content"
+        api = FakeScanApi([])
+        st = {"deviceId": "dev2", "repo": "", "families": {}, "pendingDeletes": []}
+        summary = syncer.run_restore(FakeRestoreGh([pkg]), api, self.cfg, st,
+                                     log=lambda *_: None)
+        self.assertEqual(summary["downloaded"], 0)
+        self.assertEqual(len(summary["failed"]), 1, "哈希对不上就不能往字体库里写")
+        self.assertFalse(os.path.exists(os.path.join(self.lib, "Broken")))
+
+    def test_dry_run_touches_nothing(self):
+        pkg = self._package("Preview")
+        api = FakeScanApi([])
+        st = {"deviceId": "dev2", "repo": "", "families": {}, "pendingDeletes": []}
+        summary = syncer.run_restore(FakeRestoreGh([pkg]), api, self.cfg, st,
+                                     dry_run=True, log=lambda *_: None)
+        self.assertEqual(summary["planned"], 1)
+        self.assertEqual(summary["downloaded"], 0)
+        self.assertFalse(os.path.exists(os.path.join(self.lib, "Preview")))
+        self.assertIn("Preview", syncer.list_remote(FakeRestoreGh([pkg]), "me", "fonts",
+                                                    log=lambda *_: None)[0]["slug"])
+
+    def test_only_one_family(self):
+        a, b = self._package("A"), self._package("BB")
+        api = FakeScanApi([])
+        st = {"deviceId": "dev2", "repo": "", "families": {}, "pendingDeletes": []}
+        summary = syncer.run_restore(FakeRestoreGh([a, b]), api, self.cfg, st,
+                                     only="BB", log=lambda *_: None)
+        self.assertEqual(summary["downloaded"], 1)
+        self.assertTrue(os.path.isdir(os.path.join(self.lib, "BB")))
+        self.assertFalse(os.path.isdir(os.path.join(self.lib, "A")))
+
+    def test_latest_version_wins(self):
+        old = self._package("Dup")
+        new = self._package("Dup", size=2048)
+        rows = syncer.list_remote(FakeRestoreGh([old, new]), "me", "fonts",
+                                  log=lambda *_: None)
+        self.assertEqual(len(rows), 1, "同一族有多个版本时只留最新的")
+        self.assertEqual(rows[0]["size"], len(new["blob"]))
+
+    def test_public_repo_refuses_restore(self):
+        pkg = self._package("X")
+        api = FakeScanApi([])
+        st = {"deviceId": "dev2", "repo": "", "families": {}, "pendingDeletes": []}
+        with self.assertRaises(RuntimeError):
+            syncer.run_restore(FakeRestoreGh([pkg], private=False), api, self.cfg, st,
+                               log=lambda *_: None)
 
 
 if __name__ == "__main__":

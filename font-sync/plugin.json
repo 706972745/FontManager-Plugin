@@ -1,13 +1,14 @@
 {
   "id": "com.fontmanager.font-sync",
   "name": "字体库同步（GitHub）",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "apiLevel": 1,
   "entry": "main.py",
   "interpreter": "python",
-  "description": "把字体库按字族打包，增量同步到**你自己的**私有 GitHub 仓库（可存多个账号、切换多个库）；没配好账号与库之前不同步任何内容；只传变化的字族。设置面板在浏览器里打开，含令牌权限说明与从零开始的教程。零第三方依赖",
+  "description": "把字体库按字族打包，增量同步到**你自己的**私有 GitHub 仓库（可存多个账号、切换多个库）；也能反过来把远端的字体下载回这台电脑（新机器一键装满字库），下载后自动重扫；没配好账号与库之前不同步任何内容；只传变化的字族。设置面板在浏览器里打开，含令牌权限说明与从零开始的教程。零第三方依赖",
   "permissions": [
-    "read:fonts"
+    "read:fonts",
+    "write:fonts"
   ],
   "hooks": [
     "init",
@@ -25,6 +26,14 @@
     },
     {
       "title": "预演本次同步（不传）",
+      "on": "plugin"
+    },
+    {
+      "title": "从 GitHub 下载到这台电脑",
+      "on": "plugin"
+    },
+    {
+      "title": "预演下载（看会拉哪些）",
       "on": "plugin"
     },
     {

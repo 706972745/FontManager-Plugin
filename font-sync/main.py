@@ -39,6 +39,8 @@ SYNC_LOCK = threading.Lock()
 MENU_FAMILY = "同步这个字族到 GitHub"
 MENU_ALL = "立即同步（全部）"
 MENU_DRYRUN = "预演本次同步（不传）"
+MENU_RESTORE = "从 GitHub 下载到这台电脑"
+MENU_RESTORE_DRY = "预演下载（看会拉哪些）"
 MENU_SETTINGS = "设置 GitHub 库…"
 MENU_GUIDE = "使用教程与权限说明…"
 MENU_OPEN = "打开同步状态目录"
@@ -179,6 +181,50 @@ def run_async(func, *args, **kwargs):
     threading.Thread(target=func, args=args, kwargs=kwargs, daemon=True).start()
 
 
+# ── 恢复任务（从 GitHub 下载回本机） ────────────────────────────────────
+def do_restore(only_family=None, dry_run=False):
+    if not require_configured():
+        return
+    if not SYNC_LOCK.acquire(blocking=False):
+        toast("已经在同步 / 恢复了，等这一轮结束")
+        return
+    scope = only_family or "全部字族"
+    _reset_progress(dry_run, "恢复 " + scope)
+    try:
+        cfg = store.load_config()
+        state = store.load_state()
+        api = local_api()
+        client = gh_client()
+        login = store.current_account()[0]
+        target = f"{(cfg.get('owner') or login)}/{cfg.get('repoName')}"
+        toast(("预演下载：" if dry_run else "开始恢复：") + f"{target} → 本机 {scope}")
+        log(f"=== 恢复开始（{scope}{'，预演' if dry_run else ''}），账号 {login}，来源 {target} ===")
+        summary = syncer.run_restore(
+            client, api, cfg, state, dry_run=dry_run,
+            overwrite=bool(cfg.get("overwriteExisting")),
+            only=only_family, log=log, progress=_on_progress)
+        if dry_run:
+            toast(f"预演完成：远端有 {summary['planned']} 个族可以拉到本机")
+        else:
+            msg = f"恢复完成：下载 {summary['downloaded']} 个族（{summary['bytes']/1048576:.1f} MB）"
+            if summary["failed"]:
+                msg += f"，{len(summary['failed'])} 个失败"
+            if summary["conflicts"]:
+                msg += f"，{len(summary['conflicts'])} 个文件冲突未覆盖"
+            toast(msg)
+    except Exception as e:
+        log("恢复失败：" + traceback.format_exc(limit=4).replace("\n", " | "))
+        toast(f"恢复失败：{e}")
+        _on_progress("error", message=str(e), error=str(e))
+    finally:
+        with _PROGRESS_LOCK:
+            if PROGRESS["phase"] not in ("done", "error", "idle"):
+                PROGRESS["phase"] = "error"
+                PROGRESS["message"] = PROGRESS["message"] or "恢复提前结束"
+                PROGRESS["finishedAt"] = int(time.time() * 1000)
+        SYNC_LOCK.release()
+
+
 # ── 设置面板 ────────────────────────────────────────────────────────────
 def open_settings_panel(tab="account"):
     """在浏览器里打开设置面板（账号 / 仓库 / 权限说明 / 教程）。
@@ -189,6 +235,8 @@ def open_settings_panel(tab="account"):
     actions = {
         "dry": lambda: run_async(do_sync, None, True),
         "sync": lambda: run_async(do_sync),
+        "restoreDry": lambda: run_async(do_restore, None, True),
+        "restore": lambda: run_async(do_restore),
     }
     try:
         url = panel.open_panel(actions, tab=tab, progress=progress_snapshot)
@@ -260,6 +308,12 @@ def handle_invoke(hook, payload):
         return
     if menu.startswith(MENU_DRYRUN):
         run_async(do_sync, None, True)
+        return
+    if menu.startswith(MENU_RESTORE_DRY):
+        run_async(do_restore, None, True)
+        return
+    if menu.startswith(MENU_RESTORE):
+        run_async(do_restore)
         return
     if menu.startswith(MENU_ALL):
         run_async(do_sync)

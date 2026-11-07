@@ -13,6 +13,7 @@
 import hashlib
 import json
 import os
+import re
 import tempfile
 import time
 
@@ -20,6 +21,7 @@ import packer
 import store
 
 OPS_PREFIX = "ops"
+LIB_TAG_PREFIX = "lib-"
 
 
 class LocalApi:
@@ -44,21 +46,32 @@ class LocalApi:
         return self._opener.open(req, timeout=self.timeout)
 
     def get(self, path):
+        return self._request("GET", path)
+
+    def post(self, path, body=None):
+        return self._request("POST", path, body)
+
+    def _request(self, method, path, body=None):
         import urllib.error
         import urllib.request
 
         url = self.base + path
-        req = urllib.request.Request(url, headers={
+        payload = None
+        headers = {
             "Authorization": f"Bearer {self.token}",
             "Accept": "application/json",
             "User-Agent": "FontManager-Plugin-font-sync/0.1",
-        })
+        }
+        if body is not None:
+            payload = json.dumps(body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=payload, headers=headers, method=method)
         try:
             with self._open(req) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
-            body = e.read()[:300].decode("utf-8", "replace")
-            raise RuntimeError(f"本地 API {e.code}：{body}") from None
+            text = e.read()[:300].decode("utf-8", "replace")
+            raise RuntimeError(f"本地 API {e.code}：{text}") from None
         except urllib.error.URLError as e:
             raise RuntimeError(f"连不上本地 API（{url}）：{e.reason}") from None
 
@@ -74,10 +87,18 @@ class LocalApi:
                 return out
 
 
-def group_by_family(faces):
-    """{family: [ {path, size, mtime, copyrightClass, ...} ]}，只留有文件的。"""
+def group_by_family(faces, library_only=True):
+    """{family: [ {path, size, mtime, copyrightClass, ...} ]}，只留有文件的。
+
+    `library_only` 过滤掉**系统字体**（`C:\\Windows\\Fonts` 那 300 多个，
+    `source = system`）：那些是 Windows 自带、不可再分发的，传上去既没用又惹版权。
+    只同步 `source = managed`（字体库里的）。老版本 API 没有 `source` 字段时放行。
+    """
     groups = {}
     for f in faces:
+        src = (f.get("source") or "").strip().lower()
+        if library_only and src and src != "managed":
+            continue
         path = f.get("path") or ""
         family = (f.get("family") or "").strip()
         if not path or not family:
@@ -104,7 +125,10 @@ def build_plan(api, cfg, state, only_family=None, log=print):
     max_bytes = int(sync_cfg.get("maxFamilyBytes") or 400 * 1024 * 1024)
 
     faces = api.faces()
+    system_faces = sum(1 for f in faces if (f.get("source") or "").lower() == "system")
     groups = group_by_family(faces)
+    if system_faces:
+        log(f"跳过 {system_faces} 个系统字体（Windows 自带，不可再分发、也不属于字体库）")
     if only_family:
         groups = {k: v for k, v in groups.items() if k == only_family}
         if not groups:
@@ -287,14 +311,23 @@ def _report(progress, phase, **fields):
         pass
 
 
-def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, progress=None):
-    """跑一次同步。返回汇总字典。"""
+def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
+             progress=None, max_families=None):
+    """跑一次同步。返回汇总字典。
+
+    `max_families`：本轮最多传几个族（按体积从小到大）。首次全量可能几十 GB，
+    一口气跑完容易中途断网、也看不到阶段性成果；分批传，剩下的下一轮继续。
+    """
     sync_cfg = cfg.get("sync") or {}
     delete_after = int(sync_cfg.get("deleteAfterDays") or 7) * 86400
     batch = max(1, int(sync_cfg.get("batchFamilies") or 100))
 
     _report(progress, "scan")
     todo, skipped = build_plan(api, cfg, state, only_family, log)
+    if max_families and len(todo) > max_families:
+        rest = len(todo) - max_families
+        todo = todo[:max_families]
+        log(f"本轮只传前 {max_families} 个族（还有 {rest} 个下轮继续）")
     total_bytes = sum(e["bytes"] for e in todo)
     _report(progress, "plan", total=len(todo), bytesTotal=total_bytes)
     summary = {"planned": len(todo), "uploaded": 0, "failed": [], "deleted": 0,
@@ -339,7 +372,8 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print, pr
             _report(progress, "pack", done=done, total=len(todo), family=family,
                     index=index, bytes=summary["bytes"], bytesTotal=total_bytes)
             try:
-                meta = packer.pack_family(os.path.join(tmpdir, "f.zip"), item["paths"])
+                meta = packer.pack_family(os.path.join(tmpdir, "f.zip"), item["paths"],
+                                          family=family)
                 prev = (state["families"].get(family) or {})
                 if prev.get("hash") == meta["hash"] and prev.get("asset"):
                     log(f"  内容未变（只动了时间戳）：{family}")
@@ -460,3 +494,253 @@ def flush_pending_deletes(gh, state, owner, name, log=print):
             keep.append(item)
     state["pendingDeletes"] = keep
     return deleted
+
+
+# ───────────────────────── 下载 / 恢复到本机 ─────────────────────────
+def list_remote(gh, owner, name, log=print):
+    """列出远端所有字体包（只认 `lib-0001` 这类分桶里的 `<slug>__<hash>.zip`）。
+
+    同一个族可能同时存在多个版本（旧版还在 7 天反悔窗口里），
+    这里按 asset 创建时间取最新的那一个 —— 恢复时永远拿最新的。
+    """
+    rows = []
+    for rel in gh.list_releases_simple(owner, name):
+        tag = rel.get("tag_name") or ""
+        if not tag.startswith(LIB_TAG_PREFIX):
+            continue
+        for a in gh.list_assets(owner, name, rel["id"]) or []:
+            slug, digest = packer.parse_asset_name(a.get("name"))
+            if not slug:
+                continue
+            rows.append({
+                "asset": a.get("name"), "slug": slug, "hash12": digest,
+                "assetId": a.get("id"), "releaseId": rel["id"], "tag": tag,
+                "size": int(a.get("size") or 0),
+                "createdAt": a.get("created_at") or "",
+            })
+    rows.sort(key=lambda r: (r["createdAt"], r["assetId"] or 0))
+    latest = {}
+    for r in rows:
+        latest[r["slug"].lower()] = r
+    out = list(latest.values())
+    out.sort(key=lambda r: r["slug"].lower())
+    log(f"远端一共 {len(rows)} 个字体包，去重后 {len(out)} 个族")
+    return out
+
+
+def read_app_library_dir():
+    """从主程序自己的配置里读「当前字体库在哪」。
+
+    为什么要读它：**新装的机器字体库是空的**，`GET /fonts` 一个路径都没有，
+    没法从字体路径推断库根。只读一个字段，不写。
+    """
+    base = os.environ.get("APPDATA") or ""
+    if not base:
+        return ""
+    for name in ("FontManager", "ZFontManager"):
+        path = os.path.join(base, name, "state.json")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("libraryDirEnabled") is False or data.get("library_dir_enabled") is False:
+            continue
+        for key in ("libraryDir", "library_dir"):
+            val = (data.get(key) or "").strip()
+            if val and os.path.isdir(val):
+                return val
+        for key in ("libraryDirs", "library_dirs"):
+            for val in data.get(key) or []:
+                if isinstance(val, str) and os.path.isdir(val):
+                    return val
+    return ""
+
+
+def guess_library_dir(faces):
+    """从字体路径推断库根：所有字体所在目录的公共祖先。
+
+    只有一个族、或者字体散在各处时这个推断不可靠，宁可不给 —— 调用方会退回
+    主程序配置或让用户手填。写错目标目录等于往人家硬盘里乱放文件。
+    """
+    dirs = sorted({os.path.dirname(f.get("path") or "") for f in faces if f.get("path")})
+    dirs = [d for d in dirs if d]
+    if len(dirs) < 2:
+        return ""
+    try:
+        common = os.path.commonpath(dirs)
+    except (ValueError, TypeError):
+        return ""
+    if not common or common.rstrip("\\/") == "":
+        return ""
+    if len(common.rstrip("\\/")) <= 3:  # 只剩 `E:` 这种盘根，太顶层，不敢用
+        return ""
+    return common
+
+
+def library_dir_for_restore(cfg, faces, log=print):
+    """决定「下载回来的字体放哪」：设置里填的 > 主程序当前库 > 路径推断。"""
+    explicit = (cfg.get("restoreDir") or "").strip()
+    if explicit:
+        if not os.path.isdir(explicit):
+            try:
+                os.makedirs(explicit, exist_ok=True)
+            except OSError as e:
+                raise RuntimeError(f"设置的恢复目录建不出来：{explicit}（{e}）") from None
+        log(f"恢复目录（设置里指定）：{explicit}")
+        return explicit
+    app = read_app_library_dir()
+    if app:
+        log(f"恢复目录（主程序当前字体库）：{app}")
+        return app
+    guess = guess_library_dir(faces)
+    if guess:
+        log(f"恢复目录（按字体路径推断）：{guess}")
+        return guess
+    raise RuntimeError("找不到字体库目录：设置面板 →「恢复」页里手动填一个")
+
+
+def _safe_dirname(family):
+    """字族名 → 目录名。和 packer.slugify 不同：这里**保留空格**（目录名更可读）。"""
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", (family or "").strip())
+    name = name.strip(" .")
+    return (name or "family")[:80]
+
+
+def _norm(family):
+    return packer.slugify(family).lower()
+
+
+def plan_restore(remote, local_families, overwrite=False, only=None):
+    """比对远端与本地，分出「要下载」和「本地已有」。"""
+    local_map = {}
+    for fam in local_families:
+        local_map[_norm(fam)] = fam
+    items, skipped = [], []
+    want = _norm(only) if only else ""
+    for row in remote:
+        key = row["slug"].lower()
+        if want and key != want:
+            continue
+        if key in local_map and not overwrite:
+            skipped.append({"family": local_map[key], "reason": "本地已有这个字族"})
+            continue
+        items.append(row)
+    return items, skipped
+
+
+def run_restore(gh, api, cfg, state, dry_run=False, overwrite=False, only=None,
+                log=print, progress=None):
+    """从 GitHub 把字体包下载回本机字体库，然后让主程序重扫。"""
+    _report(progress, "restore-scan")
+    faces = api.faces()
+    # 这里连系统字体一起算「本机已有」：远端万一有同名字族，不该重复下一份到库里
+    local_families = list(group_by_family(faces, library_only=False).keys())
+    log(f"本机现有 {len(local_families)} 个字族，{len(faces)} 个字体文件")
+
+    owner, name, _branch = ensure_repo(gh, cfg, state, log, create=False)
+    _report(progress, "restore-plan")
+    remote = list_remote(gh, owner, name, log)
+    items, skipped = plan_restore(remote, local_families, overwrite, only)
+    need_bytes = sum(r["size"] for r in items)
+    log(f"计划：下载 {len(items)} 个族（{need_bytes/1048576:.1f} MB），"
+        f"跳过 {len(skipped)} 个（本机已有）")
+    _report(progress, "restore-plan", total=len(items), bytesTotal=need_bytes,
+            message=f"{len(items)} 个族待下载")
+
+    target_dir = ""
+    if not dry_run:
+        target_dir = library_dir_for_restore(cfg, faces, log)
+
+    summary = {"planned": len(items), "downloaded": 0, "bytes": 0, "failed": [],
+               "conflicts": [], "skipped": len(skipped), "rescan": ""}
+    if dry_run:
+        for row in items[:50]:
+            log(f"  会下载：{row['slug']}（{row['size']/1048576:.2f} MB，{row['tag']}）")
+        state["lastRestorePlan"] = {
+            "at": int(time.time()),
+            "target": target_dir or "",
+            "families": [{"slug": r["slug"], "bytes": r["size"]} for r in items],
+        }
+        store.save_state(state)
+        _report(progress, "done", done=0, total=len(items), bytesTotal=need_bytes,
+                message=f"预演完成：{len(items)} 个族可从远端恢复")
+        return summary
+
+    tmpdir = tempfile.mkdtemp(prefix="font-restore-")
+    try:
+        for index, row in enumerate(items, start=1):
+            _report(progress, "download", done=summary["downloaded"], total=len(items),
+                    index=index, family=row["slug"], bytes=summary["bytes"],
+                    bytesTotal=need_bytes)
+            tmp_zip = os.path.join(tmpdir, f"{index:05d}.zip")
+            try:
+                size = gh.download_asset(owner, name, row["assetId"], tmp_zip)
+                digest = packer.sha256_path(tmp_zip)
+                if not digest.startswith(row["hash12"]):
+                    raise RuntimeError(f"下载内容校验失败（sha256={digest[:12]}，"
+                                       f"期望 {row['hash12']}）")
+                manifest = packer.read_manifest(tmp_zip) or {}
+                family = (manifest.get("family") or "").strip() or row["slug"]
+                dest = os.path.join(target_dir, _safe_dirname(family))
+                _report(progress, "unpack", done=summary["downloaded"], total=len(items),
+                        index=index, family=family, bytes=summary["bytes"],
+                        bytesTotal=need_bytes)
+                res = packer.unpack_family(tmp_zip, dest, skip_existing=not overwrite)
+                summary["downloaded"] += 1
+                summary["bytes"] += size
+                if res["conflicts"]:
+                    summary["conflicts"].extend(
+                        {"family": family, "path": p} for p in res["conflicts"])
+                    log(f"  ! {family}：{len(res['conflicts'])} 个文件本机已有且内容不同，"
+                        f"未覆盖（要覆盖请勾「覆盖本机同名文件」）")
+                state["families"][family] = {
+                    "hash": digest, "asset": row["asset"], "assetId": row["assetId"],
+                    "bucket": row["tag"], "size": size,
+                    "fonts": len(res["fonts"]) + len(res["skipped"]),
+                    "docs": len(res["docs"]), "at": int(time.time() * 1000),
+                    "fingerprint": "", "fromRemote": True,
+                }
+                log(f"  ↓ {family}：{len(res['fonts'])} 个文件写入 {dest}")
+                _report(progress, "download", done=summary["downloaded"], total=len(items),
+                        index=index, family=family, bytes=summary["bytes"],
+                        bytesTotal=need_bytes)
+            except Exception as e:
+                summary["failed"].append({"family": row["slug"], "error": str(e)})
+                log(f"  ✗ {row['slug']}：{e}")
+            finally:
+                try:
+                    os.remove(tmp_zip)
+                except OSError:
+                    pass
+    finally:
+        try:
+            os.rmdir(tmpdir)
+        except OSError:
+            pass
+
+    if summary["downloaded"]:
+        _report(progress, "rescan", done=summary["downloaded"], total=len(items),
+                bytes=summary["bytes"], bytesTotal=need_bytes, message="让主程序重新扫描字体库…")
+        try:
+            api.post("/fonts/scan")
+            after = api.faces()
+            summary["rescan"] = f"重扫完成，本机现在 {len(group_by_family(after))} 个字族"
+            log(summary["rescan"])
+        except Exception as e:
+            summary["rescan"] = f"重扫失败（字体已经写进库，手动点一次「重新扫描」即可）：{e}"
+            log(summary["rescan"])
+
+    state["lastRestoreAt"] = int(time.time() * 1000)
+    store.save_state(state)
+    log(f"恢复结束：下载 {summary['downloaded']} 个族 / {summary['bytes']/1048576:.1f} MB，"
+        f"失败 {len(summary['failed'])}，文件冲突 {len(summary['conflicts'])}")
+    _report(progress, "done", done=summary["downloaded"], total=len(items),
+            bytes=summary["bytes"], bytesTotal=need_bytes,
+            message=(f"恢复完成：{summary['downloaded']} 个族"
+                     + (f"，{len(summary['failed'])} 个失败" if summary["failed"] else "")
+                     + (f"，{len(summary['conflicts'])} 个文件冲突未覆盖"
+                        if summary["conflicts"] else "")))
+    return summary
