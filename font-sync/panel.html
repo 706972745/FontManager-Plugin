@@ -667,6 +667,12 @@
     }
     let data = {};
     try { data = await res.json(); } catch (e) { data = { ok: false, error: '响应解析失败（HTTP ' + res.status + '）' }; }
+    // 旧进程 + 新页面的错位信号：页面从磁盘读是刚更新的，服务还跑在更新前启动的
+    // 旧插件进程里（1.4.5 及以前拖 zip 更新不会重启进程）。把 404 翻译成人话。
+    if (!data.ok && data.error === 'unknown endpoint') {
+      data.error = '面板页面比插件进程新（插件刚更新过但进程还没重启）。'
+        + '请完全退出 FontManager 再打开，或在 设置 → 插件 里把这个插件的开关关掉再打开（主程序 1.4.6+ 拖入新 zip 会自动重启）。';
+    }
     return data;
   }
 
