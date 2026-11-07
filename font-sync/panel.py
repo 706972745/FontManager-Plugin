@@ -17,6 +17,8 @@ import json
 import os
 import re
 import secrets
+import shutil
+import subprocess
 import threading
 import time
 import urllib.parse
@@ -24,6 +26,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import gh as ghmod
+import packer
 import store
 import syncer
 
@@ -211,6 +214,17 @@ def capabilities(login, owner="", name=""):
 REPO_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 
 
+def _edge_exe():
+    """找 Edge：--app 窗口模式用它。装了 WebView2 的机器必然有。"""
+    for p in (
+        os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
+        os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
+    ):
+        if os.path.exists(p):
+            return p
+    return shutil.which("msedge")
+
+
 def repo_name_problem(name):
     """GitHub 的仓库名规则，提前拦住比让它回 422 好懂。
 
@@ -329,11 +343,96 @@ class _Handler(BaseHTTPRequestHandler):
             return {"ok": False, "error": f"读不到 {owner}/{name}：{e}"}
         total = sum(r["size"] for r in rows)
         st = store.load_state()
-        synced = {str(k).lower() for k in (st.get("families") or {})}
+        # state.families 的键是**原始族名**，asset 名是 slug —— 两边都过归一化再比，
+        # 顺带兼容老包被 GitHub 改写的名字（`!`→`.`）
+        synced = {packer.slug_key(k) for k in (st.get("families") or {})}
         for row in rows:
-            row["synced"] = row["slug"].lower() in synced
+            row["synced"] = packer.slug_key(row["slug"]) in synced
         return {"ok": True, "owner": owner, "name": name, "count": len(rows),
                 "bytes": total, "families": rows[:2000],
+                "target": cfg.get("restoreDir") or syncer.read_app_library_dir()}
+
+    # -- 补缺：快照里有、这台机器上没有的字体 --
+    def _local_api(self):
+        """拿主程序本地 API 客户端。面板只能从 FontManager 的插件菜单打开（actions 注入）。"""
+        fn = self.panel.actions.get("localApi")
+        if not fn:
+            return None, {"ok": False,
+                          "error": "这个功能要从 FontManager 里打开面板才能用（右键插件 → 设置 GitHub 库…）"}
+        try:
+            return fn(), None
+        except Exception as e:
+            return None, {"ok": False, "error": f"本地 API 不可用：{e}"}
+
+    @staticmethod
+    def _token_error(e):
+        """read:snapshot 是 0.8.0 新增权限；旧令牌（插件启用时签发的）没有它。"""
+        msg = str(e)
+        if "403" in msg or "read:snapshot" in msg:
+            return ("插件令牌还没有读快照的权限（0.8.0 新增）："
+                    "重启 FontManager（或关掉再打开本插件）就会拿到新令牌")
+        return None
+
+    def _missing_snapshots(self):
+        api, err = self._local_api()
+        if err:
+            return err
+        try:
+            snaps = (api.get("/snapshots") or {}).get("snapshots") or []
+        except Exception as e:
+            friendly = self._token_error(e)
+            return {"ok": False, "error": friendly or f"读快照失败：{e}"}
+        out = [{"name": s.get("name") or "", "count": len(s.get("entries") or [])}
+               for s in snaps]
+        return {"ok": True, "snapshots": out}
+
+    def _missing_analyze(self, name):
+        """快照里有、本机没有的族；再对一遍远端，标出「能从 GitHub 补」的。"""
+        api, err = self._local_api()
+        if err:
+            return err
+        try:
+            snaps = (api.get("/snapshots") or {}).get("snapshots") or []
+        except Exception as e:
+            friendly = self._token_error(e)
+            return {"ok": False, "error": friendly or f"读快照失败：{e}"}
+        snap = next((s for s in snaps if (s.get("name") or "") == name), None)
+        if snap is None:
+            return {"ok": False, "error": f"找不到快照：{name}"}
+        want = {}
+        for e in (snap.get("entries") or []):
+            # 系统自带字体任何 Windows 机器都有，不算缺失
+            if e.get("system"):
+                continue
+            fam = (e.get("family") or "").strip()
+            if fam:
+                want[fam] = want.get(fam, 0) + 1
+        have = {(f.get("family") or "").strip() for f in api.faces()}
+        missing = sorted(f for f in want if f not in have)
+
+        login, token = store.current_account()
+        cfg = store.load_config()
+        repo = (cfg.get("repoName") or "").strip()
+        owner = (cfg.get("owner") or login).strip()
+        by_key = {}
+        if repo and token:
+            try:
+                rows = syncer.list_remote(ghmod.Gh(token), owner, repo,
+                                          log=lambda *_a: None)
+            except Exception:
+                rows = []
+            by_key = {packer.slug_key(r["slug"]): r for r in rows}
+
+        items = []
+        for fam in missing:
+            row = by_key.get(packer.slug_key(fam))
+            items.append({"family": fam, "faces": want[fam], "onRemote": bool(row),
+                          "asset": (row or {}).get("asset") or "",
+                          "size": int((row or {}).get("size") or 0)})
+        return {"ok": True, "snapshot": name, "entries": sum(want.values()),
+                "families": len(want), "missing": items,
+                "downloadable": sum(1 for i in items if i["onRemote"]),
+                "notOnRemote": [i["family"] for i in items if not i["onRemote"]],
                 "target": cfg.get("restoreDir") or syncer.read_app_library_dir()}
 
     # -- POST --
@@ -520,6 +619,27 @@ class _Handler(BaseHTTPRequestHandler):
             fn()
             return self._json({"ok": True, "message": "恢复已开始，进度见下方进度条"})
 
+        if path == "/api/missing/analyze":
+            name = str(data.get("name") or "").strip()
+            if not name:
+                return self._json({"ok": False, "error": "先选一个快照"})
+            return self._json(self._missing_analyze(name))
+
+        if path == "/api/missing/snapshots":
+            # 统一走 POST（0.4.1 的教训：别让「有没有 body」决定方法）
+            return self._json(self._missing_snapshots())
+
+        if path == "/api/missing/restore":
+            # 业务在 main.dispatch_action（restoreMissing）里；面板只负责转交
+            fn = self.panel.actions.get("dispatch")
+            if not fn:
+                return self._json({"ok": False,
+                                   "error": "这个功能要从 FontManager 里打开面板才能用"})
+            fams = data.get("families")
+            if not isinstance(fams, list) or not fams:
+                return self._json({"ok": False, "error": "先勾选要下载的字族"})
+            return self._json(fn("restoreMissing", {"families": fams}))
+
         # ── 杂项 ──────────────────────────────────────────────
         if path == "/api/open_dir":
             target = store.PLUGIN_DIR
@@ -593,6 +713,17 @@ class Panel:
 
     def open(self, tab="account"):
         url = self.url(tab)
+        # 首选：Edge 的 --app 模式 —— 没有地址栏、没有标签页的独立窗口，
+        # 观感就是一个应用窗口（Win10/11 自带 Edge；装了 WebView2 就一定有）。
+        # 打不开再退回系统默认浏览器。
+        edge = _edge_exe()
+        if edge:
+            try:
+                subprocess.Popen([edge, f"--app={url}", "--window-size=1000,900"],
+                                 close_fds=True)
+                return url
+            except Exception:
+                pass
         try:
             webbrowser.open(url, new=2)
         except Exception:
@@ -624,14 +755,28 @@ class Panel:
 _CURRENT = {"panel": None}
 
 
-def open_panel(actions=None, tab="account", progress=None):
-    """已经开着就复用（同一个 key），否则新起一个。返回 URL。"""
+def open_panel(actions=None, tab="account", progress=None, auto_open=True):
+    """已经开着就复用（同一个 key），否则新起一个。返回 URL。
+
+    `auto_open=False`：只把服务起好，不自己开窗口 —— 交给调用方决定
+    （main 会按主程序版本决定「应用内窗口」还是「Edge 独立窗口」）。
+    """
     panel = _CURRENT.get("panel")
     if panel and panel.alive():
         panel.actions.update(actions or {})
         if progress:
             panel.progress = progress
-        return panel.open(tab)
+        if auto_open:
+            panel.open(tab)
+        return panel.url(tab)
     panel = Panel(actions, progress=progress).start()
     _CURRENT["panel"] = panel
-    return panel.open(tab)
+    if auto_open:
+        panel.open(tab)
+    return panel.url(tab)
+
+
+def current_panel():
+    """当前活着的面板（可能为 None）。main 用它自己控制开窗方式。"""
+    p = _CURRENT.get("panel")
+    return p if (p and p.alive()) else None

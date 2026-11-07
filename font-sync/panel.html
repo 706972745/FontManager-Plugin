@@ -5,81 +5,96 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>字体库同步 · 设置</title>
 <style>
+  /* 设计 token 与 FontManager 主程序 design/tokens.css 同源（黑白灰、双主题）。 */
   :root {
-    --bg: #f6f7f9;
+    color-scheme: light;
+    --bg: #f4f4f7;
     --card: #ffffff;
-    --ink: #1c2024;
-    --ink-2: #5b6470;
-    --line: #e3e6ea;
-    --accent: #3b5bdb;
-    --accent-soft: #eef1fd;
-    --ok: #1a7f37;
-    --ok-soft: #e8f5ec;
-    --warn: #9a6700;
-    --warn-soft: #fff8e5;
-    --bad: #c0392b;
-    --bad-soft: #fdecea;
-    --mono: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
+    --ink: #1c1c24;
+    --ink-2: rgba(28, 28, 38, 0.62);
+    --ink-3: rgba(28, 28, 38, 0.44);
+    --line: rgba(0, 0, 0, 0.1);
+    --e1: rgba(22, 22, 32, 0.04);
+    --accent: #3f3f46;
+    --accent-2: #52525b;
+    --accent-grad: linear-gradient(135deg, #52525b, #3f3f46);
+    --accent-soft: rgba(22, 22, 32, 0.06);
+    --on-accent: #ffffff;
+    --ok: #3f3f46;   /* 主程序刻意黑白灰：success/warning/error 同 accent */
+    --warn: #3f3f46;
+    --bad: #3f3f46;
+    --soft: rgba(22, 22, 32, 0.06);
+    --shadow-ground: 0 1px 2px rgba(30, 30, 55, 0.12);
+    --mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #14171b;
-      --card: #1c2025;
-      --ink: #e6e9ed;
-      --ink-2: #9aa4b1;
-      --line: #2b3138;
-      --accent: #7d95ff;
-      --accent-soft: #232a3d;
-      --ok: #5ed17f;
-      --ok-soft: #1c2c22;
-      --warn: #e2b13c;
-      --warn-soft: #2e2718;
-      --bad: #ff8579;
-      --bad-soft: #2f1d1b;
+      color-scheme: dark;
+      --bg: #0e0e0e;
+      --card: #17171b;
+      --ink: #e8e8e8;
+      --ink-2: rgba(232, 232, 232, 0.6);
+      --ink-3: rgba(232, 232, 232, 0.4);
+      --line: rgba(255, 255, 255, 0.08);
+      --e1: rgba(255, 255, 255, 0.04);
+      --accent: #d4d4d8;
+      --accent-2: #a1a1aa;
+      --accent-grad: linear-gradient(135deg, #d4d4d8, #a1a1aa);
+      --accent-soft: rgba(255, 255, 255, 0.06);
+      --on-accent: #18181b;
+      --ok: #d4d4d8;
+      --warn: #d4d4d8;
+      --bad: #d4d4d8;
+      --soft: rgba(255, 255, 255, 0.06);
+      --shadow-ground: 0 1px 2px rgba(0, 0, 0, 0.4);
     }
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font: 14px/1.65 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+    font: 14px/1.65 "Inter", "Segoe UI", system-ui, "Microsoft YaHei UI",
+      "Microsoft YaHei", "PingFang SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
   .wrap { max-width: 980px; margin: 0 auto; padding: 22px 20px 60px; }
   header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
   .logo {
-    width: 40px; height: 40px; border-radius: 11px; flex: 0 0 auto;
-    background: linear-gradient(140deg, #4c6ef5, #2b3fa8); color: #fff;
+    width: 40px; height: 40px; border-radius: 10px; flex: 0 0 auto;
+    background: var(--accent-grad); color: var(--on-accent);
     display: grid; place-items: center; font-weight: 700; font-size: 19px;
   }
   h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: .2px; }
   .sub { margin: 2px 0 0; color: var(--ink-2); font-size: 12.5px; }
   .pill {
     margin-left: auto; padding: 6px 13px; border-radius: 999px; font-size: 12.5px;
-    background: var(--accent-soft); color: var(--accent); border: 1px solid transparent;
+    background: var(--soft); color: var(--accent); border: 1px solid var(--line);
     white-space: nowrap;
   }
-  .pill.ok { background: var(--ok-soft); color: var(--ok); }
-  .pill.bad { background: var(--bad-soft); color: var(--bad); }
-  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.ok { background: var(--soft); color: var(--accent); border-color: var(--line); }
+  .pill.bad { background: var(--soft); color: var(--accent); border-color: var(--line); }
+  .pill.warn { background: var(--soft); color: var(--accent); border-color: var(--line); }
 
   nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
   nav button {
-    font: inherit; font-size: 13.5px; padding: 7px 14px; border-radius: 9px;
-    border: 1px solid var(--line); background: var(--card); color: var(--ink-2);
-    cursor: pointer;
+    font: inherit; font-size: 13.5px; padding: 7px 14px; border-radius: 8px;
+    border: 1px solid var(--line); background: transparent; color: var(--ink-2);
+    cursor: pointer; transition: color 180ms ease, background 180ms ease;
   }
   nav button:hover { border-color: var(--accent); color: var(--accent); }
-  nav button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  nav button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
   section { display: none; }
   section.on { display: block; }
 
   .card {
-    background: var(--card); border: 1px solid var(--line); border-radius: 13px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     padding: 18px 20px; margin-bottom: 14px;
+    box-shadow: var(--shadow-ground);
   }
   .card h2 { font-size: 14.5px; margin: 0 0 4px; display: flex; align-items: center; gap: 9px; }
   .num {
-    width: 21px; height: 21px; border-radius: 50%; background: var(--accent); color: #fff;
+    width: 21px; height: 21px; border-radius: 50%; background: var(--accent-grad);
+    color: var(--on-accent);
     font-size: 12px; display: inline-grid; place-items: center; flex: 0 0 auto;
   }
   .card p { margin: 6px 0; color: var(--ink-2); }
@@ -90,19 +105,15 @@
     font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
     background: var(--card); color: var(--ink); min-width: 220px; flex: 1 1 240px;
   }
-  input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+  input:focus { outline: none; border-color: var(--accent); }
   button.act {
     font: inherit; font-size: 13.5px; padding: 8px 16px; border-radius: 8px; cursor: pointer;
-    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+    border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent);
+    font-weight: 600;
   }
-  button.act.ghost { background: transparent; color: var(--accent); }
-  button.act.danger { background: transparent; border-color: var(--bad); color: var(--bad); }
-  button.act:disabled { opacity: .55; cursor: default; }
-  /* 深色下亮蓝底 + 白字对比度不够，改成深色字 */
-  @media (prefers-color-scheme: dark) {
-    button.act:not(.ghost):not(.danger) { color: #10131a; font-weight: 600; }
-    nav button.on { color: #10131a; font-weight: 600; }
-  }
+  button.act.ghost { background: transparent; color: var(--accent); font-weight: 400; }
+  button.act.danger { background: transparent; border-color: var(--accent); color: var(--accent); font-weight: 400; }
+  button.act:disabled { opacity: .4; cursor: default; }
   ol.steps a, .card p a { color: var(--accent); }
   a.btn {
     display: inline-block; font-size: 13.5px; padding: 7px 14px; border-radius: 8px;
@@ -114,12 +125,12 @@
   pre { background: var(--accent-soft); padding: 10px 12px; border-radius: 8px; overflow: auto; }
 
   .note {
-    border-radius: 9px; padding: 10px 13px; margin: 10px 0 0; font-size: 13px;
-    border: 1px solid var(--line); background: var(--bg);
+    border-radius: 8px; padding: 10px 13px; margin: 10px 0 0; font-size: 13px;
+    border: 1px solid var(--line); background: var(--soft); color: var(--ink);
   }
-  .note.ok { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
-  .note.bad { background: var(--bad-soft); border-color: transparent; color: var(--bad); }
-  .note.warn { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
+  .note.ok { border-color: var(--line); }
+  .note.bad { border-color: var(--accent); }
+  .note.warn { border-color: var(--line); }
   .note b { color: inherit; }
 
   table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
@@ -131,9 +142,9 @@
     display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px;
     background: var(--accent-soft); color: var(--accent); font-family: var(--mono);
   }
-  .yes { color: var(--ok); font-weight: 600; }
-  .no { color: var(--bad); font-weight: 600; }
-  .unknown { color: var(--warn); font-weight: 600; }
+  .yes { color: var(--accent); font-weight: 600; }
+  .no { color: var(--ink-3); font-weight: 600; }
+  .unknown { color: var(--ink-2); font-weight: 600; }
 
   ul.plain { margin: 8px 0 0; padding-left: 20px; color: var(--ink-2); }
   ul.plain li { margin: 3px 0; }
@@ -154,7 +165,8 @@
   .acct .mask { color: var(--ink-2); font-family: var(--mono); font-size: 12px; }
   .acct .sp { margin-left: auto; }
   .badge-cur {
-    padding: 1px 8px; border-radius: 999px; background: var(--ok-soft); color: var(--ok);
+    padding: 1px 8px; border-radius: 999px; background: var(--soft); color: var(--accent);
+    border: 1px solid var(--line);
     font-size: 11.5px;
   }
   footer {
@@ -189,8 +201,8 @@
   }
   .prog .txt { margin-top: 7px; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
   .prog .txt b { color: var(--ink); font-weight: 600; }
-  .prog.err .bar > i { background: var(--bad); }
-  .prog.ok .bar > i { background: var(--ok); }
+  .prog.err .bar > i { background: var(--accent-2); }
+  .prog.ok .bar > i { background: var(--accent); }
   @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -209,6 +221,7 @@
     <button data-tab="account" class="on">账号与令牌</button>
     <button data-tab="repo">同步到哪个库</button>
     <button data-tab="restore">下载回本机</button>
+    <button data-tab="missing">补缺</button>
     <button data-tab="perm">权限说明</button>
     <button data-tab="guide">新手教程</button>
     <button data-tab="adv">高级</button>
@@ -404,6 +417,39 @@
     </div>
   </section>
 
+  <!-- ══════════ 补缺 ══════════ -->
+  <section id="tab-missing">
+    <div class="card">
+      <h2>快照里有、这台电脑上没有的字体</h2>
+      <p class="lead">把另一台电脑的<b>快照</b>在这台 FontManager 里导入后，界面上会提示「其中 N 个本机没有」
+        （快照只记清单，不含字体文件）。到这一页选那个快照，插件会列出缺哪些，
+        并且标出<b>哪些能直接从你的 GitHub 库补回来</b> —— 勾上、点一下，下载完自动重新扫描。</p>
+      <div class="note">判断「本机没有」用的是字体族名。系统自带的字体（微软雅黑这些）任何电脑都有，不列入缺失。</div>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">1</span>选一个快照</h2>
+      <div class="row">
+        <select id="missSnap" style="flex:1 1 280px"><option value="">正在读取快照列表…</option></select>
+        <button class="act ghost" id="missReload" type="button">刷新快照列表</button>
+        <button class="act" id="missAnalyze" type="button">分析缺失</button>
+      </div>
+      <div id="missMsg"></div>
+    </div>
+
+    <div class="card" id="missResultCard" style="display:none">
+      <h2><span class="num">2</span>勾选要补回来的字族</h2>
+      <p class="sub" id="missSummary"></p>
+      <div id="missList"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="act ghost" id="missAll" type="button">全选可下载的</button>
+        <button class="act ghost" id="missNone" type="button">取消全选</button>
+        <button class="act" id="missGo" type="button">下载勾选的字族</button>
+      </div>
+      <p class="sub" id="missTarget"></p>
+    </div>
+  </section>
+
   <!-- ══════════ 权限 ══════════ -->
   <section id="tab-perm">
     <div class="card">
@@ -435,7 +481,11 @@
         <thead><tr><th style="width:24%">权限</th><th style="width:30%">用途</th><th>说明</th></tr></thead>
         <tbody>
           <tr><td><span class="tag">read:fonts</span></td><td>读字体清单（<code>GET /fonts</code>）</td>
-            <td>要知道本地有哪些字族、每个族在哪个目录，才能按族打包。<b>只读</b>，不改字体、不删文件。</td></tr>
+            <td>要知道本地有哪些字族、每个族在哪个目录，才能按族打包；「补缺」也用它判断本机已有哪些族。<b>只读</b>，不改字体、不删文件。</td></tr>
+          <tr><td><span class="tag">write:fonts</span></td><td>触发重扫（<code>POST /fonts/scan</code>）</td>
+            <td>下载回来的字体要让界面立刻看见，不用你手动点一次「重新扫描」。</td></tr>
+          <tr><td><span class="tag">read:snapshot</span></td><td>读快照清单（<code>GET /snapshots</code>）</td>
+            <td>「补缺」页要知道快照里记了哪些字族，才能对比出这台机器缺什么。<b>0.8.0 新增</b> —— 老令牌没有它，重启 FontManager 后自动拿到。只读，不动快照内容。</td></tr>
           <tr><td><span class="tag">/health</span></td><td>启动自检</td><td>确认本地 API 与令牌可用，失败时在日志里说清楚。</td></tr>
         </tbody>
       </table>
@@ -616,7 +666,7 @@
   }
 
   // ── 页签 ────────────────────────────────────────────────
-  const tabs = ['account', 'repo', 'restore', 'perm', 'guide', 'adv'];
+  const tabs = ['account', 'repo', 'restore', 'missing', 'perm', 'guide', 'adv'];
   function show(tab) {
     if (tabs.indexOf(tab) < 0) tab = 'account';
     document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
@@ -735,6 +785,8 @@
       renderProgress(p.progress);
       if (p.progress.running) startPolling();
     }
+    // 补缺页的快照下拉框顺手填好（失败就静默，用户切过去再点刷新也行）
+    loadMissingSnaps(true);
   }
 
   // 建令牌直链
@@ -1001,6 +1053,86 @@
     const r = await api('restore', {});
     msg($('restoreMsg'), r.ok ? '已开始下载 —— 进度在下面实时更新。' : esc(r.error || '触发失败'),
         r.ok ? 'ok' : 'bad');
+    if (r.ok) startPolling();
+  };
+
+  // ── 补缺 ────────────────────────────────────────────────
+  let MISS = null;
+
+  async function loadMissingSnaps(quiet) {
+    const sel = $('missSnap');
+    const r = await api('missing/snapshots', {});
+    if (!r.ok) {
+      sel.innerHTML = '<option value="">读取失败</option>';
+      if (!quiet) msg($('missMsg'), esc(r.error || ''), 'bad');
+      return;
+    }
+    if (!r.snapshots.length) {
+      sel.innerHTML = '<option value="">这个 FontManager 里还没有快照（先在主程序里建或导入一个）</option>';
+      return;
+    }
+    sel.innerHTML = r.snapshots.map((s) =>
+      '<option value="' + esc(s.name) + '">' + esc(s.name) + '（' + s.count + ' 条）</option>'
+    ).join('');
+    if (!quiet) msg($('missMsg'), '有 ' + r.snapshots.length + ' 个快照，选一个再点「分析缺失」。', 'ok');
+  }
+  $('missReload').onclick = () => loadMissingSnaps(false);
+
+  $('missAnalyze').onclick = async () => {
+    const name = $('missSnap').value;
+    if (!name) { msg($('missMsg'), '先选一个快照。', 'bad'); return; }
+    msg($('missMsg'), '正在分析（要对一遍远端 release，族多时几秒）…');
+    const r = await api('missing/analyze', { name });
+    if (!r.ok) { msg($('missMsg'), esc(r.error || ''), 'bad'); return; }
+    MISS = r;
+    const box = $('missList');
+    $('missResultCard').style.display = '';
+    if (!r.missing.length) {
+      box.innerHTML = '<div class="note">这台机器上快照里的字体都在，什么都不用补。</div>';
+      $('missSummary').textContent = '';
+      $('missTarget').textContent = '';
+      msg($('missMsg'), '没有缺失。', 'ok');
+      return;
+    }
+    const rows = r.missing.map((m) => (
+      '<label class="acct" style="display:flex;gap:8px;align-items:center;cursor:' +
+        (m.onRemote ? 'pointer' : 'default') + '">' +
+        '<input type="checkbox" class="missChk" data-family="' + esc(m.family) + '"' +
+          (m.onRemote ? ' checked' : ' disabled') + '>' +
+        '<span class="who" style="flex:1">' + esc(m.family) +
+          (m.faces > 1 ? '（' + m.faces + ' 个字面）' : '') + '</span>' +
+        (m.onRemote
+          ? '<span class="badge-cur">远端有 · ' + mb(m.size) + '</span>'
+          : '<span class="mask">远端没有 —— 先在原电脑同步，或手动找字体文件</span>') +
+      '</label>'
+    )).join('');
+    $('missSummary').innerHTML = '快照 <b>' + esc(r.snapshot) + '</b>：' + r.families +
+      ' 个字族里，本机缺 <b>' + r.missing.length + '</b> 个；其中 <b>' + r.downloadable +
+      '</b> 个能从 GitHub 库直接补' +
+      (r.notOnRemote.length ? '，' + r.notOnRemote.length + ' 个远端没有' : '') + '。';
+    $('missTarget').textContent = r.target
+      ? '会下载到：' + r.target
+      : '还没确定下载目录 —— 先到「下载回本机」页填一个并保存。';
+    box.innerHTML = rows;
+    msg($('missMsg'), r.downloadable
+      ? '勾好之后点「下载勾选的字族」。'
+      : '远端一个都没有 —— 先在原来那台电脑跑一次同步。', r.downloadable ? 'ok' : 'bad');
+  };
+
+  $('missAll').onclick = () =>
+    document.querySelectorAll('.missChk:not([disabled])').forEach((c) => { c.checked = true; });
+  $('missNone').onclick = () =>
+    document.querySelectorAll('.missChk').forEach((c) => { c.checked = false; });
+
+  $('missGo').onclick = async () => {
+    const fams = Array.from(document.querySelectorAll('.missChk:checked'))
+      .map((c) => c.dataset.family);
+    if (!fams.length) { msg($('missMsg'), '先勾选要下载的字族。', 'bad'); return; }
+    const r = await api('missing/restore', { families: fams });
+    msg($('missMsg'),
+      r.ok ? '已开始下载 ' + fams.length + ' 个族 —— 进度条在「下载回本机」页实时更新。'
+           : esc(r.error || '触发失败'),
+      r.ok ? 'ok' : 'bad');
     if (r.ok) startPolling();
   };
 

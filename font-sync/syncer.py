@@ -291,10 +291,19 @@ def _ops_record(device_id, entries, removed):
 
 
 def _find_asset_id(gh, owner, name, release_id, asset_name):
-    """撞名（422）时把已存在 asset 的 id 取回来。取不到就返回 None，不抛异常。"""
+    """撞名（422）时把已存在 asset 的 id 取回来。取不到就返回 None，不抛异常。
+
+    比较用归一化 slug：GitHub 会把名字里的 `!` 改写成 `.`（FS-1），我们记的名字
+    和 GitHub 存的名字可能差一个字符——`Far_Out!__x.zip` vs `Far_Out.__x.zip`。
+    拆出 (slug, hash12) 后按 slug_key 比，hash12 是内容寻址的，必须严格相等。
+    """
     try:
+        want_slug, want_digest = packer.parse_asset_name(asset_name)
         for a in gh.list_assets(owner, name, release_id) or []:
-            if a.get("name") == asset_name:
+            got_slug, got_digest = packer.parse_asset_name(a.get("name"))
+            if got_slug is None:
+                continue
+            if got_digest == want_digest and packer.slug_key(got_slug) == packer.slug_key(want_slug):
                 return a.get("id")
     except Exception:
         pass
@@ -334,6 +343,7 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
                "removed": [], "skipped": skipped, "bytes": 0}
     gone = list(skipped.get("gone") or [])
     delete_removed = bool(sync_cfg.get("deleteRemovedFamilies", True))
+    fused = False
     if gone:
         if not delete_removed:
             log(f"本地少了 {len(gone)} 个族，但设置里关掉了「同步删除」，远端保持不动")
@@ -342,10 +352,23 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
             ok, why = _safe_to_remove(skipped.get("localFamilies") or 0,
                                       len(state.get("families") or {}), gone)
             if not ok:
-                log(f"⚠️ 跳过删除：{why}")
+                # 保险丝触发：账**不能清**（本地清单不可信，清了会把真删除也抹掉），
+                # 但同一批缺席每轮都念叨一遍就是噪音 —— 按「缺席集合」去重提示。
+                fp = hashlib.sha256(",".join(gone).encode("utf-8")).hexdigest()[:16]
+                prev = state.get("lastGone") or {}
+                if prev.get("key") == fp:
+                    log(f"⚠️ 与上一轮完全相同：仍有 {len(gone)} 个族缺席"
+                        f"（保险丝生效中，本轮不删任何远端内容）")
+                else:
+                    log(f"⚠️ 跳过删除：{why}")
+                state["lastGone"] = {"key": fp, "at": int(time.time()), "count": len(gone)}
                 gone = []
+                fused = True
             else:
                 log(f"本地少了 {len(gone)} 个族，本轮会一并删掉远端备份（可在设置里关掉）")
+    if not fused and not gone and state.get("lastGone"):
+        # 清单恢复正常（或没有缺席了）：解除去重记忆，下次再触发时重新完整提示
+        state.pop("lastGone", None)
     if dry_run:
         state["lastPlan"] = {"at": int(time.time()),
                              "families": [{"family": e["family"], "bytes": e["bytes"]}
@@ -521,7 +544,9 @@ def list_remote(gh, owner, name, log=print):
     rows.sort(key=lambda r: (r["createdAt"], r["assetId"] or 0))
     latest = {}
     for r in rows:
-        latest[r["slug"].lower()] = r
+        # 去重键用归一化 slug：老包的 `!` 被 GitHub 改写成了 `.`（FS-1），
+        # `Far_Out.` 和 `Far_Out` 必须认成同一个族，否则恢复清单里出现重复项
+        latest[packer.slug_key(r["slug"])] = r
     out = list(latest.values())
     out.sort(key=lambda r: r["slug"].lower())
     log(f"远端一共 {len(rows)} 个字体包，去重后 {len(out)} 个族")
@@ -610,19 +635,26 @@ def _safe_dirname(family):
 
 
 def _norm(family):
-    return packer.slugify(family).lower()
+    return packer.slug_key(family)
 
 
 def plan_restore(remote, local_families, overwrite=False, only=None):
-    """比对远端与本地，分出「要下载」和「本地已有」。"""
+    """比对远端与本地，分出「要下载」和「本地已有」。
+
+    `only` 可以是单个族名，也可以是**族名列表**（面板「补缺」一次勾选多个用）。
+    匹配键是归一化 slug（`slug_key`）：老包被 GitHub 改写过名字（`!`→`.`）也能对上。
+    """
     local_map = {}
     for fam in local_families:
         local_map[_norm(fam)] = fam
     items, skipped = [], []
-    want = _norm(only) if only else ""
+    if isinstance(only, str):
+        want = {_norm(only)} if only else set()
+    else:
+        want = {_norm(x) for x in (only or []) if x}
     for row in remote:
-        key = row["slug"].lower()
-        if want and key != want:
+        key = packer.slug_key(row["slug"])
+        if want and key not in want:
             continue
         if key in local_map and not overwrite:
             skipped.append({"family": local_map[key], "reason": "本地已有这个字族"})

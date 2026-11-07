@@ -37,6 +37,7 @@ API_TOKEN = ""
 SYNC_LOCK = threading.Lock()
 
 MENU_FAMILY = "同步这个字族到 GitHub"
+MENU_RESTORE_FAMILY = "从 GitHub 下载这个字族"
 MENU_ALL = "立即同步（全部）"
 MENU_DRYRUN = "预演本次同步（不传）"
 MENU_RESTORE = "从 GitHub 下载到这台电脑"
@@ -183,12 +184,16 @@ def run_async(func, *args, **kwargs):
 
 # ── 恢复任务（从 GitHub 下载回本机） ────────────────────────────────────
 def do_restore(only_family=None, dry_run=False):
+    """恢复：单个族（右键菜单）、多个族（面板「补缺」）或全部。"""
+    only = list(only_family) if isinstance(only_family, (list, tuple)) else only_family
     if not require_configured():
         return
     if not SYNC_LOCK.acquire(blocking=False):
         toast("已经在同步 / 恢复了，等这一轮结束")
         return
-    scope = only_family or "全部字族"
+    scope = ("、".join(only[:3]) + (f" 等 {len(only)} 个族" if len(only) > 3 else ""))
+    if not only:
+        scope = "全部字族"
     _reset_progress(dry_run, "恢复 " + scope)
     try:
         cfg = store.load_config()
@@ -202,7 +207,7 @@ def do_restore(only_family=None, dry_run=False):
         summary = syncer.run_restore(
             client, api, cfg, state, dry_run=dry_run,
             overwrite=bool(cfg.get("overwriteExisting")),
-            only=only_family, log=log, progress=_on_progress)
+            only=only, log=log, progress=_on_progress)
         if dry_run:
             toast(f"预演完成：远端有 {summary['planned']} 个族可以拉到本机")
         else:
@@ -226,20 +231,66 @@ def do_restore(only_family=None, dry_run=False):
 
 
 # ── 设置面板 ────────────────────────────────────────────────────────────
-def open_settings_panel(tab="account"):
-    """在浏览器里打开设置面板（账号 / 仓库 / 权限说明 / 教程）。
+def dispatch_action(action, payload=None):
+    """面板的通用动作入口：面板进程里没有 main 的函数，只认识动作名。
 
-    为什么不用 tkinter：插件自带的是 Python embeddable 发行版，**没有 tkinter**，
-    装没装 Python 也不该影响设置。浏览器面板零依赖，还能放权限表和可点击的链接。
+    新的面板动作在这里加分支，别往 panel.py 里塞业务逻辑 —— 那边只管 HTTP 与页面。
+    """
+    payload = payload or {}
+    if action == "restoreMissing":
+        families = [str(f).strip() for f in (payload.get("families") or []) if str(f).strip()]
+        if not families:
+            toast("没有勾选任何要下载的字族")
+            return {"ok": False, "error": "没有勾选任何要下载的字族"}
+        run_async(do_restore, families, False)
+        return {"ok": True, "message": f"开始恢复 {len(families)} 个族，进度看下方进度条"}
+    return {"ok": False, "error": f"未知动作：{action}"}
+
+
+def emit_open_url(url, title):
+    """请主程序开一个应用内窗口加载 url（1.4.3+ 的 open-url 消息）。"""
+    sys.stdout.write(json.dumps({"type": "open-url", "url": url, "title": title},
+                                ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
+def _main_supports_panel_window(api):
+    """主程序 ≥1.4.3 才会处理 open-url；老版本问都不问，直接走本地窗口。"""
+    try:
+        v = str((api.get("/health") or {}).get("version") or "")
+        parts = tuple(int(x) for x in v.split(".")[:3])
+        return parts >= (1, 4, 3)
+    except Exception:
+        return False
+
+
+def open_settings_panel(tab="account"):
+    """在窗口里打开设置面板（账号 / 仓库 / 权限说明 / 教程）。
+
+    开窗方式按主程序能力自动降级，任何一级失败都有下一级兜底：
+    1. 主程序 ≥1.4.3 → 发 open-url，由主程序开**应用内窗口**；
+    2. 否则 → Edge `--app` 无边框独立窗口（装了 WebView2 的机器必有 Edge）；
+    3. 再不行 → 系统默认浏览器。
     """
     actions = {
         "dry": lambda: run_async(do_sync, None, True),
         "sync": lambda: run_async(do_sync),
         "restoreDry": lambda: run_async(do_restore, None, True),
         "restore": lambda: run_async(do_restore),
+        # 面板「补缺」要用的本地 API 客户端（读快照 + 字体清单）与通用动作分发
+        "localApi": local_api,
+        "dispatch": dispatch_action,
     }
     try:
-        url = panel.open_panel(actions, tab=tab, progress=progress_snapshot)
+        url = panel.open_panel(actions, tab=tab, progress=progress_snapshot,
+                               auto_open=False)
+        if _main_supports_panel_window(local_api()):
+            emit_open_url(url, "字体库同步 · 设置")
+            log(f"已请求主程序打开设置窗口：{url}")
+            return
+        p = panel.current_panel()
+        if p:
+            p.open(tab)
         log(f"设置面板：{url}")
     except Exception as e:
         toast(f"打不开设置面板：{e}")
@@ -323,6 +374,12 @@ def handle_invoke(hook, payload):
             log("这个菜单需要在某个字族上右键")
             return
         run_async(do_sync, family, False)
+        return
+    if menu.startswith(MENU_RESTORE_FAMILY):
+        if not family:
+            log("这个菜单需要在某个字族上右键")
+            return
+        run_async(do_restore, family, False)
         return
     log(f"未知菜单项：{menu}")
 

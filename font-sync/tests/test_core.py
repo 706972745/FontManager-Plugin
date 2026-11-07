@@ -641,13 +641,22 @@ class DuplicateAssetTests(unittest.TestCase):
                          "撞的是同一个 asset，绝不能塞进待删队列")
 
     def test_collision_recovers_the_existing_asset_id(self):
-        orig = syncer.packer.asset_name
-        syncer.packer.asset_name = lambda family, meta: f"{family}.zip"
-        try:
-            gh = self._gh([{"name": "Alpha.zip", "id": 4242}])
-            syncer.run_sync(gh, self.api, self.cfg, self.state, log=lambda *_: None)
-        finally:
-            syncer.packer.asset_name = orig
+        # 常规撞名：上次传了但没记上账，这次 422 后要按名字找回 id。
+        # （GitHub 改写 `!`→`.` 的兼容路径在 test_v080.FindAssetIdCompatTests）
+        seen = []
+
+        def fake_upload(owner, name, rid, asset, blob):
+            seen.append(asset)
+            return {}  # 422
+
+        def fake_list(owner, name, rid):
+            return [{"name": seen[0], "id": 4242}] if seen else []
+
+        gh = FakeSyncGh()
+        gh.upload_asset = fake_upload
+        gh.list_assets = fake_list
+        syncer.run_sync(gh, self.api, self.cfg, self.state, log=lambda *_: None)
+        self.assertTrue(seen, "前提：真的发起过上传")
         self.assertEqual(self.state["families"]["Alpha"]["assetId"], 4242,
                          "取回 id 才能在本地删族时删掉远端那份")
         self.assertEqual(self.state["pendingDeletes"], [])

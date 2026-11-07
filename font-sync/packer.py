@@ -24,7 +24,10 @@ DOC_PREFIXES = (
 )
 DOC_EXT = (".txt", ".md", ".html", ".htm", ".pdf", ".rtf")
 FIXED_DATE = (1980, 1, 1, 0, 0, 0)
-ILLEGAL = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
+# `!` 必须避开：GitHub 会把 release asset 名里的 `!` 改写成 `.`（2026-11-07 实测：
+# 传 `Excl_!_Test__….zip` 存回 `Excl_._Test__…`）。不改写会造成「我们起的名字」和
+# 「GitHub 存的名字」对不上 → 恢复匹配失败、撞 422 后取不回 asset id、删族时远端泄漏。
+ILLEGAL = re.compile(r'[\\/:*?"<>|\x00-\x1f!]+')
 
 
 def slugify(family):
@@ -32,6 +35,21 @@ def slugify(family):
     name = ILLEGAL.sub("_", (family or "").strip())
     name = re.sub(r"\s+", "_", name).strip("._")
     return (name or "family")[:60]
+
+
+def slug_key(s):
+    """匹配用的**归一键**（不是命名！命名仍用 slugify）。
+
+    为什么要有它：历史上 GitHub 把 asset 名里的 `!` 改写成 `.`，所以远端可能存在
+    `Far_Out.`（老包，被 GitHub 改写过）、`Far_Out!`（更老、侥幸存活的）和
+    `Far_Out`（0.8.0 起 slugify 直接避开 `!`）三种形态——它们都是同一个字族
+    `Far Out!`。匹配（恢复跳过 / 撞 422 找回 id / 去重）必须把它们看成同一个：
+    小写后把所有分隔符（空格 点 叹号 下划线 连字符）压成单个 `_`。
+    真正不同的族（`A-B` vs `A_B`）会被并成同一个键——可接受：匹配只用 在
+    「恢复要不要跳过 / 撞名找回 id」这类只影响便利性的路径上，删除永远走 assetId。
+    """
+    k = re.sub(r"[\s.!_\-]+", "_", (s or "").strip().lower())
+    return k.strip("_")
 
 
 def is_doc(name):
