@@ -22,7 +22,8 @@
 **Node.js 22 LTS**（约 32 MB），也可以用系统里已有的 Python/Node —— 装没装、缺什么、
 占多少空间，界面上一眼可见，随时可删、可一键补回。
 
-1. 把 [`template-hello/`](template-hello/) 复制一份当起点（一百来行，每行都有注释）；
+1. 把 [`template-hello/`](template-hello/) 复制一份当起点（一百来行，每行都有注释；
+   也可以直接下 [template-hello.zip](https://github.com/706972745/FontManager-Plugin/releases/latest/download/template-hello.zip)）；
 2. 改 `plugin.json` 的 `id` / `name` / `menus` / `permissions`，改 `main.py` 里
    `do_family()` / `do_plugin()` 两个函数为你的功能；
 3. 整个文件夹放进 设置 → 插件 →「打开插件目录」打开的目录，点「重新扫描」+ 打开开关；
@@ -47,7 +48,7 @@
 
 | 插件 | 版本 | 说明 | 下载 |
 |---|---|---|---|
-| [字体使用统计](font-stats/) | 1.1.0 | 右键字族 → 统计它的字面数与版权分类，结果写进该字族的备注 | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/font-stats.zip) |
+| [字体使用统计](font-stats/) | 1.1.1 | 右键字族 → 统计它的字面数与版权分类，结果写进该字族的备注 | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/font-stats.zip) |
 
 ### ☁️ 备份 / 多机同步
 

@@ -1,7 +1,7 @@
 {
   "id": "com.fontmanager.example.font-stats",
   "name": "字体使用统计（示例）",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "apiLevel": 1,
   "description": "右键一个字族 → 统计它的字面数与版权分类，结果写进备注。自带 Python 运行时（runtime/），机器上不用装任何东西",
   "entry": "main.py",

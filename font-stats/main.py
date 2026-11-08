@@ -20,6 +20,15 @@ import urllib.request
 API_BASE = ""
 API_TOKEN = ""
 
+# 版权分类：主程序 API 给的是代码，UI 里显示的是这些话 —— 备注写给人看，用后者
+CLASS_LABELS = {
+    "free_commercial": "免费商用",
+    "free_personal": "个人免费",
+    "paid": "收费",
+    "timelimited": "限时免费",
+    "unknown": "未知",
+}
+
 
 def api(method, route, body=None):
     """调 FontManager 本地 API（令牌是主程序按 manifest 权限签发的受限令牌）"""
@@ -55,7 +64,12 @@ def on_context_menu(payload):
     for f in faces:
         key = f.get("copyrightClass") or "unknown"
         classes[key] = classes.get(key, 0) + 1
-    parts = "、".join("%s %d 个" % (k, v) for k, v in sorted(classes.items()))
+    # API 只给 copyrightClass 的**内部代码**（free_personal / unknown …）。
+    # 直接照抄进备注，用户看到的是英文枚举 —— 这里翻成人话（与主程序 UI 的叫法一致）。
+    parts = "、".join(
+        "%s %d 个" % (CLASS_LABELS.get(k, k), v)
+        for k, v in sorted(classes.items(), key=lambda kv: (-kv[1], kv[0]))
+    )
     note = "【统计】%d 个字面；版权分类：%s" % (len(faces), parts)
     api("PUT", "/curation/note", {"family": family, "note": note})
     log("%s → %s" % (family, note))

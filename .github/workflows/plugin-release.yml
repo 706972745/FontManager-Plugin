@@ -1,5 +1,9 @@
-# 插件发版：font-sync/** 有推送就重新打包，并覆盖上传到 v1 release
+# 插件发版：任一插件目录有推送就重新打包，并覆盖上传到 v1 release
 # （发布页 https://github.com/706972745/FontManager-Plugin/releases/latest 里的 zip 即最新版）
+#
+# 2026-11-08：以前 paths 只有 font-sync/**，另两个插件的 zip 是手工上传的，
+# 仓库更新后 release 里的包还是旧的（specimen-export 因此丢了设置面板）。
+# 现在四个目录任一变动都会重新打包，dist/*.zip 一起覆盖上传。
 name: Plugin Release
 
 on:
@@ -7,6 +11,9 @@ on:
     branches: [main]
     paths:
       - "font-sync/**"
+      - "font-stats/**"
+      - "specimen-export/**"
+      - "template-hello/**"
       - ".github/workflows/plugin-release.yml"
       - ".github/package_plugin.py"
   workflow_dispatch:
@@ -28,13 +35,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      # dist/ 里会有 font-sync-<版本>.zip / font-sync.zip / font-sync-full.zip
+      # 以及 font-stats.zip / specimen-export.zip / template-hello.zip（整目录 + 自带 runtime）
       - name: 打包并自检
         run: python .github/package_plugin.py
 
       - name: 跑插件单测
         run: python -m unittest discover -s font-sync/tests
 
-      # dist/ 里现在有 font-sync-<版本>.zip / font-sync.zip / font-sync-full.zip
       - name: 上传到 v1 release（同名 asset 覆盖）
         env:
           GH_TOKEN: ${{ github.token }}
