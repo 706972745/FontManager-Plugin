@@ -205,12 +205,17 @@ def check_repo(gh, owner, name):
                 "message": f"{owner}/{name} 还不存在 —— 保存后第一次同步会自动建成私有仓"}
     if not st["private"]:
         return {"ok": False, "message": f"{owner}/{name} 是**公开**仓库，同步已被禁止（先改成私有）"}
-    if st["anonymousReadable"]:
+    anon = st.get("anonymousReadable")
+    if anon is True:
         return {"ok": False, "message": f"{owner}/{name} 能匿名读取，同步已被禁止（检查仓库可见性）"}
     if st["empty"]:
         return {"ok": True, "willInit": True,
                 "message": f"{owner}/{name} 是空仓库 —— 首次同步会自动放一个 README 建出首个提交"}
-    return {"ok": True, "message": f"{owner}/{name} 可用（私有，默认分支 {st['defaultBranch']}）"}
+    # anon 是 None：匿名复核被 GitHub 限流（公司共享出口 IP 很常见）。
+    # 登录态查到的 private=true 是权威的，放行并说明，不再误拦。
+    note = ("" if anon is False
+            else "（匿名复核这步被 GitHub 限流跳过了 —— 以登录态查到的「私有」为准，不影响使用）")
+    return {"ok": True, "message": f"{owner}/{name} 可用（私有，默认分支 {st['defaultBranch']}）{note}"}
 
 
 def ensure_repo(gh, cfg, state, log=print, create=True):
@@ -238,6 +243,10 @@ def ensure_repo(gh, cfg, state, log=print, create=True):
         raise RuntimeError(f"{owner}/{name} 不是私有仓库，已中止（改成私有再来）")
     if st["anonymousReadable"]:
         raise RuntimeError(f"{owner}/{name} 匿名可读，已中止（这是最危险的状态，先改私有）")
+    if st.get("anonymousReadable") is None:
+        # 匿名探测被限流（403/429）：0.8.6 以前会把私有仓误判成「匿名可读」。
+        # 判不了就信登录态的 private=true，继续 —— 闸门只拦「真拿到 200」的。
+        log("匿名复核被 GitHub 限流，跳过 —— 以登录态查到的「私有」为准")
 
     branch = st["defaultBranch"] or "main"
     if st["empty"]:

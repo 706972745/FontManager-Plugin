@@ -221,7 +221,11 @@ class Gh:
         """匿名能不能读：这是「仓库到底是不是私有」的唯一可信判据。
 
         `private: true` 字段不够（fork / 转移 / 组织策略都可能变），必须**不带令牌**探一次。
-        返回 True = 公网可读 = 绝对不能往里放字体。
+        返回 True = 公网可读 = 绝对不能往里放字体；
+        返回 False = 匿名 404，确认读不到；
+        返回 None = 判不了（403/429/451 等）—— 公司共享出口 IP 匿名限流（60 次/时）
+        会回 403，0.8.6 及以前把它当成「能读」，私有仓被误判成公开、同步被禁。
+        判不了就回落到登录态查到的 private 字段，绝不能把「拒绝」当「能读」。
         """
         req = urllib.request.Request(
             f"{API}/repos/{owner}/{name}",
@@ -231,7 +235,9 @@ class Gh:
             with self._open(req, 20) as resp:
                 return resp.status == 200
         except urllib.error.HTTPError as e:
-            return e.code != 404  # 403/451 之类也视作「不公开」，但不要当成私有来信任
+            if e.code == 404:
+                return False
+            return None
         except Exception:
             return False
 

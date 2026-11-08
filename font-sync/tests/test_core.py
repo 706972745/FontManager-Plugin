@@ -283,6 +283,14 @@ class CheckRepoTests(unittest.TestCase):
         self.assertFalse(res["ok"])
         self.assertIn("匿名", res["message"])
 
+    def test_anonymous_check_rate_limited_still_ok(self):
+        """0.8.7 修：公司共享出口 IP 匿名限流（403）曾被当成「能匿名读取」，
+        私有仓被误判成公开、同步被禁。anonymousReadable=None（判不了）
+        必须放行，以登录态 private=true 为准。"""
+        res = self.run_case(anonymousReadable=None)
+        self.assertTrue(res["ok"])
+        self.assertIn("限流", res["message"])
+
     def test_empty_repo_will_be_initialised(self):
         res = self.run_case(empty=True)
         self.assertTrue(res["ok"])
@@ -298,6 +306,38 @@ class GhTests(unittest.TestCase):
         import gh
         self.assertEqual(gh._error_text(b'{"message":"Not Found"}'), "Not Found")
         self.assertTrue(gh._error_text(b'{"message":"Validation Failed","errors":[{"code":"x"}]}'))
+
+    def test_anonymous_probe_maps_status(self):
+        """200=能读、404=私有、403/429=判不了（None）。
+        0.8.6 把 403（公司共享出口 IP 匿名限流）当成「能读」，私有仓被误判。"""
+        import io
+        import urllib.error
+        import gh as ghmod
+
+        class Resp:
+            def __init__(self, code):
+                self.status = code
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        class FakeGh(ghmod.Gh):
+            def __init__(self, code):
+                self.code = code
+                self.token = ""
+
+            def _open(self, req, timeout=None):
+                if self.code == 200:
+                    return Resp(200)
+                raise urllib.error.HTTPError(req.full_url, self.code, "msg", {},
+                                             io.BytesIO(b""))
+
+        for code, want in ((200, True), (404, False), (403, None), (429, None), (451, None)):
+            self.assertIs(FakeGh(code).repo_is_anonymous_readable("a", "b"), want,
+                          f"HTTP {code} 应映射为 {want}")
 
 
 class RemovedFamilyTests(unittest.TestCase):

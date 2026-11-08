@@ -218,8 +218,11 @@ def capabilities(login, owner="", name=""):
                 add("目标仓库可用性", None, f"{target_owner}/{name} 还不存在，首次同步会自动建私有仓")
             elif not st["private"]:
                 add("目标仓库可用性", False, f"{target_owner}/{name} 是公开仓库，同步已被禁止")
-            elif st["anonymousReadable"]:
+            elif st["anonymousReadable"] is True:
                 add("目标仓库可用性", False, f"{target_owner}/{name} 能匿名读取，同步已被禁止")
+            elif st["anonymousReadable"] is None:
+                add("目标仓库可用性", None,
+                    f"{target_owner}/{name} 私有（匿名复核被 GitHub 限流跳过，以登录态为准）")
             else:
                 add("目标仓库可用性", True,
                     f"{target_owner}/{name} 私有、匿名读不到"
