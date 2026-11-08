@@ -10,12 +10,16 @@
 - 收 stdin 的 JSON 行：{"type":"init", apiBase, apiToken, ...} / {"type":"invoke", hook, payload}
 - 发 stdout 的 JSON 行：{"type":"log", message} / {"type":"toast", message}
 
-设置面板走 settings 钩子（有 tkinter 才有窗口，没有就退化成文件夹选择框）。
+设置面板：有 tkinter 就用 tkinter 的窗口；没有（插件自带的 embeddable Python 就是这样）
+就用 Windows 自带的 PowerShell + WinForms 画同一个面板 —— 两条路都能改导出位置，
+不会出现「点了齿轮什么都没发生」。
 只依赖标准库 + Pillow（Pillow 缺失时降级成「只报错不出图」，不会崩）。
 """
+import base64
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -73,14 +77,127 @@ def export_dir():
     return DEFAULT_EXPORT_DIR
 
 
+# ── 没有 tkinter 时的原生对话框（PowerShell + WinForms） ─────────────────
+# 插件自带的 embeddable Python 不含 tkinter，光靠 tkinter 的方案在真实安装里
+# 等于「点了没反应」。Windows 一定有 PowerShell，用它画同一个面板最省事。
+_PS_HEAD = r'''
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$initial = $env:FM_EXPORT_INITIAL
+'''
+
+_PS_PICK_FOLDER = _PS_HEAD + r'''
+$d = New-Object System.Windows.Forms.FolderBrowserDialog
+$d.Description = "选择示例图的保存位置"
+$d.ShowNewFolderButton = $true
+if ($initial -and (Test-Path -LiteralPath $initial)) { $d.SelectedPath = $initial }
+if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::Out.Write("B64:" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($d.SelectedPath)))
+}
+'''
+
+_PS_SETTINGS = _PS_HEAD + r'''
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "示例文本导出 · 设置"
+$form.TopMost = $true
+$form.FormBorderStyle = "FixedDialog"
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.StartPosition = "CenterScreen"
+$form.ClientSize = New-Object System.Drawing.Size(520, 152)
+
+$lbl = New-Object System.Windows.Forms.Label
+$lbl.Text = "示例图的保存位置"
+$lbl.SetBounds(16, 14, 460, 20)
+$form.Controls.Add($lbl)
+
+$tb = New-Object System.Windows.Forms.TextBox
+$tb.SetBounds(16, 40, 380, 24)
+$tb.Text = $initial
+$form.Controls.Add($tb)
+
+$browse = New-Object System.Windows.Forms.Button
+$browse.Text = "选择…"
+$browse.SetBounds(404, 39, 92, 26)
+$browse.Add_Click({
+  $fd = New-Object System.Windows.Forms.FolderBrowserDialog
+  $fd.Description = "选择示例图的保存位置"
+  if ($tb.Text) { $fd.SelectedPath = $tb.Text }
+  if ($fd.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $tb.Text = $fd.SelectedPath }
+})
+$form.Controls.Add($browse)
+
+$ok = New-Object System.Windows.Forms.Button
+$ok.Text = "保存"
+$ok.SetBounds(308, 104, 90, 28)
+$ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
+$form.Controls.Add($ok)
+
+$cancel = New-Object System.Windows.Forms.Button
+$cancel.Text = "关闭"
+$cancel.SetBounds(406, 104, 90, 28)
+$cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+$form.Controls.Add($cancel)
+
+$form.AcceptButton = $ok
+$form.CancelButton = $cancel
+$form.Add_Shown({ $form.Activate() })
+if ($form.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::Out.Write("B64:" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($tb.Text)))
+}
+'''
+
+
+def run_powershell(script, initial=""):
+    """跑一段 PowerShell，返回它写在 stdout 的文本（B64 已解码；没输出返回 None）。
+
+    用 -EncodedCommand（UTF-16LE + base64）传脚本：中文路径、引号都不会被控制台编码搞坏。
+    """
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    env = dict(os.environ, FM_EXPORT_INITIAL=initial or "")
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-STA", "-EncodedCommand", encoded],
+        capture_output=True,
+        timeout=600,
+        env=env,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if proc.returncode != 0:
+        err = (proc.stderr or b"").decode("utf-8", "replace").strip()
+        raise RuntimeError(err[:300] or f"powershell exit {proc.returncode}")
+    text = (proc.stdout or b"").decode("utf-8", "replace").strip()
+    if not text:
+        return None
+    if text.startswith("B64:"):
+        return base64.b64decode(text[4:]).decode("utf-8", "replace")
+    return text
+
+
+def ps_pick_folder(initial=""):
+    try:
+        return run_powershell(_PS_PICK_FOLDER, initial) or None
+    except Exception as e:  # noqa: BLE001
+        log(f"PowerShell 文件夹选择框失败：{e}")
+        return None
+
+
+def ps_settings_panel(initial=""):
+    try:
+        return run_powershell(_PS_SETTINGS, initial)
+    except Exception as e:  # noqa: BLE001
+        log(f"PowerShell 设置面板失败：{e}")
+        return None
+
+
 def choose_folder():
-    """弹系统文件夹选择框。插件没有主界面，用 tkinter 的原生对话框最省事；
-    万一这个 Python 不带 tkinter，就返回 None 让调用方提示手动改 config.json。"""
+    """弹系统文件夹选择框：优先 tkinter，装的是 embeddable Python 时用 PowerShell 兜底。"""
     try:
         import tkinter as tk
         from tkinter import filedialog
     except Exception:
-        return None
+        return ps_pick_folder(export_dir())
     try:
         root = tk.Tk()
         root.withdraw()
@@ -90,7 +207,7 @@ def choose_folder():
         return path or None
     except Exception as e:
         log(f"打开文件夹选择框失败：{e}")
-        return None
+        return ps_pick_folder(export_dir())
 
 
 
@@ -314,7 +431,7 @@ def set_export_folder():
     current = export_dir()
     picked = choose_folder()
     if not picked:
-        log("没选文件夹（取消或这个 Python 没有 tkinter）")
+        log("没选文件夹（用户取消）")
         emit("toast", f"仍然保存到：{current}")
         return
     if save_config({"exportDir": picked}):
@@ -328,15 +445,32 @@ def open_settings_panel():
     主程序只负责把钩子发过来（设置 → 插件 → 该行右侧的齿轮），面板长什么样、
     怎么存，全由插件自己决定。两个注意点：
 
-    - **必须另起线程**跑 tkinter 的主循环。面板开着的时候 stdin 里还会来别的调用
-      （右键菜单、再点一次齿轮），在主线程里 mainloop 等于把插件堵死。
-    - 没装 tkinter 的精简版 Python 上，退化成系统文件夹选择框，不报错、不崩。
+    - **必须另起线程**跑面板，否则面板开着的时候 stdin 里的其它调用全被堵死。
+    - 插件自带的 embeddable Python **没有 tkinter**：这条路走 PowerShell + WinForms
+      画同一块面板（见 ps_settings_panel），不会出现「点了齿轮什么都没发生」。
     """
     try:
         import tkinter as tk
         from tkinter import filedialog
     except Exception:
-        set_export_folder()
+        def run_ps():
+            log("这个 Python 没有 tkinter，改用系统对话框打开设置")
+            path = ps_settings_panel(export_dir())
+            if path is None:
+                log("设置面板：已关闭（没改）")
+                return
+            target = (path or "").strip()
+            if not target:
+                emit("toast", "导出位置不能为空")
+                return
+            if target == export_dir():
+                emit("toast", f"仍然是：{target}")
+                return
+            if save_config({"exportDir": target}):
+                emit("toast", f"以后示例图保存到：{target}")
+                log(f"设置面板：导出位置改为 {target}")
+
+        threading.Thread(target=run_ps, daemon=True).start()
         return
 
     def run():

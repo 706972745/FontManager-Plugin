@@ -1,7 +1,7 @@
 {
   "id": "com.fontmanager.example.specimen-export",
   "name": "示例文本导出",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "apiLevel": 1,
   "entry": "main.py",
   "interpreter": "python",

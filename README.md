@@ -42,7 +42,7 @@
 
 | 插件 | 版本 | 说明 | 下载 |
 |---|---|---|---|
-| [示例文本导出](specimen-export/) | 1.2.0 | 右键字族 → 把示例文本渲染成 PNG（1280px 样张）；保存位置可自设；启动时自动跑 API / 权限自检 | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/specimen-export.zip) |
+| [示例文本导出](specimen-export/) | 1.2.1 | 右键字族 → 把示例文本渲染成 PNG（1280px 样张）；保存位置可自设；启动时自动跑 API / 权限自检 | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/specimen-export.zip) |
 
 ### 📊 数据统计
 
