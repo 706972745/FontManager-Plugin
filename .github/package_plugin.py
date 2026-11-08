@@ -14,9 +14,14 @@
 
 > 后三个以前是手工上传的：仓库改了版本、release 里的包不变，用户下载到的
 > 是旧代码（例如没有 settings 齿轮）。现在统一由这里打包，CI 每次推送都覆盖。
+
+另外生成 `dist/release-notes.md`（发布页正文）：插件清单里的版本 + `CHANGELOG.md`
+最新一段拼出来，CI 用 `gh release edit` 覆盖到 `v1` 发布页 —— 版本改了、说明跟着变，
+不用再手工维护一份表格。
 """
 import json
 import os
+import re
 import shutil
 import sys
 import zipfile
@@ -118,6 +123,81 @@ def verify(path, plugin, version):
             sys.exit(f"{os.path.basename(path)} 版本不一致：包内 {got}，源码 {version}")
 
 
+def one_liner(plugin):
+    """表格里的一句话说明：优先 summary，否则取 description 的第一句。"""
+    m = manifest(plugin)
+    text = (m.get("summary") or m.get("description") or "").strip()
+    text = re.split(r"[；。]", text)[0]
+    return text if len(text) <= 60 else text[:59] + "…"
+
+
+def changelog_section():
+    """CHANGELOG.md 里最新的一段（第一个 `## ` 到下一个 `## ` 之前）。"""
+    path = os.path.join(ROOT, "CHANGELOG.md")
+    if not os.path.isfile(path):
+        return ""
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().splitlines()
+    out, capturing = [], False
+    for line in lines:
+        if line.startswith("## "):
+            if capturing:
+                break
+            capturing = True
+        if capturing:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
+def write_release_notes(downloads):
+    """生成发布页正文。downloads：{插件目录: 资产文件名}。"""
+    repo = "https://github.com/706972745/FontManager-Plugin"
+    rows = [
+        "| 插件 | 版本 | 下载 | 说明 |",
+        "|---|---|---|---|",
+    ]
+    order = [FONT_SYNC] + FULL_DIR_PLUGINS
+    for plugin in order:
+        m = manifest(plugin)
+        asset = downloads[plugin]
+        rows.append(
+            f"| [{m['name']}]({repo}/tree/main/{plugin}) | {m['version']} "
+            f"| [`{asset}`]({repo}/releases/download/v1/{asset}) | {one_liner(plugin)} |"
+        )
+
+    parts = [
+        "## 插件合集 v1（自带运行时）",
+        "",
+        "每个插件一个独立目录，下载对应 ZIP 解压后放进 FontManager 的插件目录即可；",
+        "`font-stats` / `specimen-export` 自带 Python 运行时（Python 3.13 + Pillow + fontTools），",
+        "机器上不用装任何东西。安装步骤见 [README](" + repo + "#-安装)。",
+        "",
+        *rows,
+        "",
+        "> `font-sync-full.zip` 是带测试与运行时的调试包，普通使用装 `font-sync-<版本>.zip`。",
+        "",
+    ]
+    section = changelog_section()
+    if section:
+        # 发布页正文里整体降一级标题（## 日期 → ### 日期，### 修复 → #### 修复），层级才顺
+        demoted = "\n".join(
+            "#" + line if line.startswith("#") else line for line in section.splitlines()
+        )
+        parts += ["---", "", demoted, ""]
+    parts += [
+        "---",
+        "",
+        "插件开发规范：[docs/PLUGINS.md](https://github.com/706972745/FontManager/blob/main/docs/PLUGINS.md)",
+        "· 主程序：[706972745/FontManager](https://github.com/706972745/FontManager)",
+        "",
+    ]
+    out = os.path.join(OUT, "release-notes.md")
+    with open(out, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("\n".join(parts))
+    print(f"release-notes.md {os.path.getsize(out)} B")
+    return out
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     made = []
@@ -126,17 +206,20 @@ def main():
     for p in fs_zips:
         verify(p, FONT_SYNC, fs_version)
         made.append(p)
+    downloads = {FONT_SYNC: f"font-sync-{fs_version}.zip"}
 
     versions = {FONT_SYNC: fs_version}
     for plugin in FULL_DIR_PLUGINS:
         out, version, count = zip_plugin_dir(plugin, OUT)
         verify(out, plugin, version)
         versions[plugin] = version
+        downloads[plugin] = f"{plugin}.zip"
         made.append(out)
         print(f"{plugin}.zip {os.path.getsize(out) / 1048576:.1f} MB（{count} 个文件，v{version}）")
 
     for p in made:
         print(f"  {os.path.basename(p):28s} {os.path.getsize(p):>10d} B")
+    write_release_notes(downloads)
     print("版本：" + "、".join(f"{k} {v}" for k, v in versions.items()))
     print("打包自检通过")
 

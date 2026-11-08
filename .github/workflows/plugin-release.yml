@@ -4,6 +4,7 @@
 # 2026-11-08：以前 paths 只有 font-sync/**，另两个插件的 zip 是手工上传的，
 # 仓库更新后 release 里的包还是旧的（specimen-export 因此丢了设置面板）。
 # 现在四个目录任一变动都会重新打包，dist/*.zip 一起覆盖上传。
+# 同时把 dist/release-notes.md（插件表 + CHANGELOG 最新一段）写回 v1 发布页正文。
 name: Plugin Release
 
 on:
@@ -14,6 +15,7 @@ on:
       - "font-stats/**"
       - "specimen-export/**"
       - "template-hello/**"
+      - "CHANGELOG.md"
       - ".github/workflows/plugin-release.yml"
       - ".github/package_plugin.py"
   workflow_dispatch:
@@ -47,3 +49,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload v1 dist/*.zip --clobber --repo 706972745/FontManager-Plugin
+
+      # 发布页正文 = 插件表（版本读 plugin.json）+ CHANGELOG.md 最新一段，
+      # 由 package_plugin.py 生成 —— 版本号改了不会出现「正文写着旧版本」的情况。
+      - name: 同步发布说明到 v1 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit v1 \
+            --notes-file dist/release-notes.md \
+            --repo 706972745/FontManager-Plugin
+          echo "发布页正文已更新："
+          head -12 dist/release-notes.md
