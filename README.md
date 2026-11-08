@@ -15,6 +15,24 @@
 
 ---
 
+## ✍️ 自己写一个插件（5 分钟）
+
+**什么都不用装**：FontManager 1.4.4+ 安装包内置 **Python 3.13 运行时**（含 Pillow、fontTools），
+1.4.10 起还内置 **Node.js 22 LTS** —— 标准库插件直接能跑，机器上不用装任何解释器。
+
+1. 把 [`template-hello/`](template-hello/) 复制一份当起点（一百来行，每行都有注释）；
+2. 改 `plugin.json` 的 `id` / `name` / `menus` / `permissions`，改 `main.py` 里
+   `do_family()` / `do_plugin()` 两个函数为你的功能；
+3. 整个文件夹放进 设置 → 插件 →「打开插件目录」打开的目录，点「重新扫描」+ 打开开关；
+4. 右键字族（或插件那一行）就能看到你的菜单项。
+
+完整规范（plugin.json 全字段、权限表、stdin/stdout 协议、进度条消息、设置面板、调试方法）：
+**[插件开发指南](https://github.com/706972745/FontManager/blob/main/docs/PLUGINS.md)**。
+ 更重的依赖需求参考 [`font-sync/`](font-sync/) 与
+[`specimen-export/`](specimen-export/) 的自带运行时做法。
+
+---
+
 ## 📦 插件列表
 
 ### 🖼️ 图像导出
