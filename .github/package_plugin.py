@@ -2,9 +2,12 @@
 """打包插件 zip（CI 与本地共用同一套清单）。
 
 产物（写入仓库根的 dist/）：
-- font-sync.zip       纯代码（压缩），普通用户装这个；runtime 由主程序 1.4.2+
-                      启用插件时自动注入，不用（也不该）打进包里
-- font-sync-full.zip  代码 + tests（不压缩），调试用
+- font-sync-<版本>.zip  纯代码（压缩），普通用户装这个；文件名带版本号，
+                        runtime 由主程序 1.4.2+ 启用插件时自动注入，
+                        不用（也不该）打进包里
+- font-sync.zip         上者的无版本号别名（历史链接
+                        releases/latest/download/font-sync.zip 继续可用）
+- font-sync-full.zip    代码 + tests（不压缩），调试用
 """
 import json
 import os
@@ -31,6 +34,11 @@ def main():
     with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
         for f in CODE:
             z.write(os.path.join(SRC, f), f)
+    # 带版本号的正式产物名（用户要的是「文件名一眼看出版本」）；
+    # font-sync.zip 保留为别名，旧链接不断
+    zv = os.path.join(OUT, f"font-sync-{version}.zip")
+    import shutil
+    shutil.copyfile(zp, zv)
     zf = os.path.join(OUT, "font-sync-full.zip")
     with zipfile.ZipFile(zf, "w", zipfile.ZIP_STORED) as z:
         for f in CODE:
@@ -41,13 +49,14 @@ def main():
                     p = os.path.join(root, f)
                     z.write(p, os.path.relpath(p, SRC))
 
-    # 自检：两个包都能完整解开，且 plugin.json 版本一致
-    for path in (zp, zf):
+    # 自检：三个包都能完整解开，且 plugin.json 版本一致
+    for path in (zp, zv, zf):
         with zipfile.ZipFile(path) as z:
             if z.testzip() is not None:
                 sys.exit(f"{os.path.basename(path)} 有损坏条目")
             v = json.loads(z.read("plugin.json").decode("utf-8"))["version"]
             assert v == version, f"{os.path.basename(path)} 版本不一致：{v}"
+    print(f"font-sync-{version}.zip {os.path.getsize(zv)} B")
     print(f"font-sync.zip       {os.path.getsize(zp)} B")
     print(f"font-sync-full.zip  {os.path.getsize(zf)} B")
     print(f"版本 {version}，打包自检通过")

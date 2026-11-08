@@ -37,4 +37,5 @@ jobs:
       - name: 上传到 v1 release（同名 asset 覆盖）
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload v1 dist/font-sync.zip dist/font-sync-full.zip --clobber --repo 706972745/FontManager-Plugin
+          # dist/ 里现在有 font-sync-<版本>.zip / font-sync.zip / font-sync-full.zip
+          run: gh release upload v1 dist/*.zip --clobber --repo 706972745/FontManager-Plugin

@@ -301,6 +301,29 @@ class CheckRepoTests(unittest.TestCase):
         self.assertFalse(res["ok"])
 
 
+class PluginJsonDisplayTests(unittest.TestCase):
+    """plugin.json 的展示字段：卡片小字要短、不能有裸露的 markdown 记号。
+
+    主程序卡片把 description/summary 当纯文本渲染 —— `**加粗**` 会原样
+    显示成星号（0.8.9 及之前就挂着这个丑）。
+    """
+
+    def test_summary_is_short_and_plain(self):
+        import json
+        m = json.load(open(os.path.join(HERE, "plugin.json"), encoding="utf-8"))
+        s = m.get("summary")
+        self.assertTrue(s, "plugin.json 必须有 summary（卡片一句话小字）")
+        self.assertLessEqual(len(s), 60, f"summary 太长（{len(s)} 字），卡片一行放不下")
+        self.assertNotIn("**", s, "summary 里不许有 markdown 星号（卡片按纯文本渲染）")
+
+    def test_description_is_plain_and_differs_from_summary(self):
+        import json
+        m = json.load(open(os.path.join(HERE, "plugin.json"), encoding="utf-8"))
+        d = m.get("description") or ""
+        self.assertNotIn("**", d, "description 里不许有 markdown 星号")
+        self.assertNotEqual(d, m.get("summary"), "description 是完整介绍，不该和 summary 一样")
+
+
 class GhTests(unittest.TestCase):
     def test_error_text_is_readable(self):
         import gh
