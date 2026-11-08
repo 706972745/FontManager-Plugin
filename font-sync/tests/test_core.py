@@ -828,6 +828,25 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(snap["login"], "someone")
         self.assertFalse(snap["configured"], "只存了令牌、没填仓库时还不算配好")
 
+    def test_snapshot_counts_all_library_ledgers(self):
+        """0.8.6 修：syncedFamilies 只数旧扁平账本，多库分账后永远显示 0。
+
+        已同步数 = 所有库账本族名的去重并集；待删数 = 各账本 pendingDeletes 总和。
+        """
+        store.upsert_account("someone", "ghp_realtoken_should_not_appear_0001")
+        store.save_config({"repoName": "fontmanager-fonts"})
+        st = store.load_state()
+        st["libraries"] = {
+            "e:\\lib-a": {"families": {"Fam1": {}, "Fam2": {}}, "pendingDeletes": ["Old1"]},
+            "e:\\lib-b": {"families": {"Fam2": {}, "Fam3": {}}, "pendingDeletes": ["Old2"]},
+            "legacy": {"families": {"Fam9": {}}, "pendingDeletes": []},
+        }
+        st["families"] = {"Fam0": {}}
+        store.save_state(st)
+        snap = self.panel_mod.snapshot()
+        self.assertEqual(snap["syncedFamilies"], 5, "Fam0..3 + Fam9，跨库去重")
+        self.assertEqual(snap["pendingDeletes"], 2, "两个库各一条待删")
+
     def test_panel_requires_a_key_and_saves_config(self):
         import urllib.error
         import urllib.request
@@ -1095,6 +1114,57 @@ class PanelTests(unittest.TestCase):
                          "远端列表与补缺列表都要是默认收起的折叠块")
         self.assertIn("max-height: 320px", html, "展开后明细区内部滚动")
         self.assertIn("默认收起", html)
+
+
+class TaskThreadTests(unittest.TestCase):
+    """0.8.5 真机翻车：面板全量恢复传 None，do_restore 在 _reset_progress
+    之前 `only[:3]` 就 TypeError，守护线程无声死亡 —— 进度永远 idle、界面
+    既没进度条也没失败提示。这里锁死两条铁律：
+      1. do_restore(None) 必须能走到进度上报，不许在 scope 计算处崩；
+      2. 任务线程任何未捕获异常都要落进 PROGRESS（phase=error），绝不静默。
+    """
+
+    def setUp(self):
+        import main
+        self.main = main
+
+    def test_do_restore_none_reaches_progress(self):
+        m = self.main
+        old_rc, old_la = m.require_configured, m.local_api
+        m.require_configured = lambda interactive=True: True
+        def _no_app():
+            raise RuntimeError("tests: 没有主程序")
+        m.local_api = _no_app
+        try:
+            m.do_restore(None, dry_run=True)  # 0.8.5 在这里就 TypeError
+            snap = m.progress_snapshot()
+            self.assertEqual(snap["phase"], "error",
+                             "local_api 失败要变成明确的 error，而不是无声")
+        except TypeError as e:
+            self.fail(f"do_restore(None) 不许再在 scope 切片处崩：{e}")
+        finally:
+            m.require_configured, m.local_api = old_rc, old_la
+            with m._PROGRESS_LOCK:
+                m.PROGRESS.update({"phase": "idle", "message": "", "error": ""})
+
+    def test_run_async_never_dies_silently(self):
+        import threading
+        import time
+        m = self.main
+        m._reset_progress(False, "test")
+        def boom():
+            raise RuntimeError("boom-123")
+        m.run_async(boom)
+        snap = {"phase": ""}
+        for _ in range(50):
+            snap = m.progress_snapshot()
+            if snap["phase"] == "error":
+                break
+            time.sleep(0.1)
+        self.assertEqual(snap["phase"], "error")
+        self.assertIn("boom-123", snap.get("error") or "")
+        with m._PROGRESS_LOCK:
+            m.PROGRESS.update({"phase": "idle", "message": "", "error": ""})
 
 
 class SystemFontTests(unittest.TestCase):

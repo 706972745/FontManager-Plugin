@@ -99,6 +99,28 @@ def _save_sync_rules(data, owner="", name=""):
     return max_mb
 
 
+def _all_family_names(st):
+    """所有账本里出现过的族名并集（多库切换，任一库同步过的都算「本机有记录」）。
+
+    0.8.6 修：snapshot() 只数旧扁平 state.families —— 多库分账（0.8.3）后
+    面板永远显示「已同步 0 个族」。
+    """
+    names = set(st.get("families") or {})
+    for led in (st.get("libraries") or {}).values():
+        if isinstance(led, dict):
+            names.update(led.get("families") or {})
+    return names
+
+
+def _all_pending_deletes(st):
+    """所有账本待删远端备份的总数（含旧扁平账）。"""
+    total = len(st.get("pendingDeletes") or [])
+    for led in (st.get("libraries") or {}).values():
+        if isinstance(led, dict):
+            total += len(led.get("pendingDeletes") or [])
+    return total
+
+
 def snapshot():
     cfg = store.load_config()
     login, token = store.current_account()
@@ -129,8 +151,8 @@ def snapshot():
             "deleteRemoved": bool(sync_cfg.get("deleteRemovedFamilies", True)),
         },
         "deviceId": st.get("deviceId") or "",
-        "syncedFamilies": len(st.get("families") or {}),
-        "pendingDeletes": len(st.get("pendingDeletes") or []),
+        "syncedFamilies": len(_all_family_names(st)),
+        "pendingDeletes": _all_pending_deletes(st),
         "lastSyncAt": st.get("lastSyncAt") or 0,
         "lastRestoreAt": st.get("lastRestoreAt") or 0,
         "restore": {
@@ -350,9 +372,7 @@ class _Handler(BaseHTTPRequestHandler):
         # state.families 的键是**原始族名**，asset 名是 slug —— 两边都过归一化再比，
         # 顺带兼容老包被 GitHub 改写的名字（`!`→`.`）。
         # 多库分账（0.8.3）：所有库的账取并集 —— 任一库同步过的都算「本机有记录」。
-        all_fams = dict(st.get("families") or {})
-        for led in (st.get("libraries") or {}).values():
-            all_fams.update(led.get("families") or {})
+        all_fams = _all_family_names(st)
         synced = {packer.slug_key(k) for k in all_fams}
         for row in rows:
             row["synced"] = packer.slug_key(row["slug"]) in synced

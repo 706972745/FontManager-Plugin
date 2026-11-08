@@ -202,21 +202,39 @@ def do_sync(only_family=None, dry_run=False):
 
 
 def run_async(func, *args, **kwargs):
-    threading.Thread(target=func, args=args, kwargs=kwargs, daemon=True).start()
+    """后台跑任务。try 包住整个目标 —— try 之前的代码（比如 0.8.5 的 scope
+    切片崩在 _reset_progress 之前）异常再也不能无声带走线程，必须落进
+    PROGRESS 让面板看到明确的「失败」。"""
+    def runner():
+        try:
+            func(*args, **kwargs)
+        except Exception as e:
+            with _PROGRESS_LOCK:
+                if PROGRESS.get("phase") not in ("done", "error"):
+                    now = int(time.time() * 1000)
+                    PROGRESS.update({"phase": "error", "message": str(e),
+                                     "error": str(e), "finishedAt": now,
+                                     "updatedAt": now})
+            log("任务异常：" + traceback.format_exc(limit=4).replace("\n", " | "))
+            toast(f"任务失败：{e}")
+    threading.Thread(target=runner, daemon=True).start()
 
 
 # ── 恢复任务（从 GitHub 下载回本机） ────────────────────────────────────
 def do_restore(only_family=None, dry_run=False):
-    """恢复：单个族（右键菜单）、多个族（面板「补缺」）或全部。"""
+    """恢复：单个族（右键菜单）、多个族（面板「补缺」）或全部（None）。"""
     only = list(only_family) if isinstance(only_family, (list, tuple)) else only_family
     if not require_configured():
         return
     if not SYNC_LOCK.acquire(blocking=False):
         toast("已经在同步 / 恢复了，等这一轮结束")
         return
-    scope = ("、".join(only[:3]) + (f" 等 {len(only)} 个族" if len(only) > 3 else ""))
+    # 判空必须在切片之前 —— 0.8.5 真机翻过车：面板全量恢复传 None，
+    # `only[:3]` 直接 TypeError，任务线程无声死掉，进度永远 idle。
     if not only:
         scope = "全部字族"
+    else:
+        scope = ("、".join(only[:3]) + (f" 等 {len(only)} 个族" if len(only) > 3 else ""))
     _reset_progress(dry_run, "恢复 " + scope)
     try:
         cfg = store.load_config()
