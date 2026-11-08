@@ -723,10 +723,6 @@ class _Handler(BaseHTTPRequestHandler):
                     pass
             return self._json({"ok": True, "state": snapshot()})
 
-        if path == "/api/close":
-            threading.Thread(target=self.panel.stop, daemon=True).start()
-            return self._json({"ok": True})
-
         return self._json({"ok": False, "error": "unknown endpoint"}, 404)
 
 

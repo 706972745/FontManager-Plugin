@@ -638,8 +638,6 @@
   <footer>
     <span>字体库同步插件</span>
     <span id="footVer"></span>
-    <span class="sp"></span>
-    <button class="act ghost" id="closeBtn" type="button">关闭面板</button>
   </footer>
 </div>
 
@@ -1406,15 +1404,12 @@
     }
   };
   $('resetBtn').onclick = async () => {
-    if (!confirm('清空本机的账号令牌与同步设置？（不动 GitHub 上的仓库和字体包）')) return;
+    if (!confirm('清空本机的账号令牌、同步设置和同步记录？（不动 GitHub 上的仓库和字体包）\n\n'
+      + '注意：同步记录清掉后，下次同步会重新核对全部字族 —— 内容没变就不会重传，'
+      + '只是要多花几分钟逐个核对。')) return;
     const r = await api('reset', {});
     if (r.state) render(r.state);
-    msg($('advMsg'), '已清空，插件回到刚装好的状态。', 'ok');
-  };
-  $('closeBtn').onclick = async () => {
-    await api('close', {});
-    document.body.innerHTML = '<div class="wrap"><div class="card"><h2>面板已关闭</h2>' +
-      '<p>需要时回 FontManager 重新打开「设置 GitHub 库…」。</p></div></div>';
+    msg($('advMsg'), '已清空，插件回到刚装好的状态。下次同步会重新核对全部字族（内容没变不会重传）。', 'ok');
   };
 
   refresh();
