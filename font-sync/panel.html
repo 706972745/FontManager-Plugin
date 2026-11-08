@@ -203,6 +203,20 @@
   .prog .txt b { color: var(--ink); font-weight: 600; }
   .prog.err .bar > i { background: var(--accent-2); }
   .prog.ok .bar > i { background: var(--accent); }
+  /* 长列表折叠：默认收起，点开看明细；展开后内部自己滚，不把整页撑长 */
+  details.fold { margin-top: 12px; }
+  details.fold > summary {
+    cursor: pointer; user-select: none; color: var(--ink-2); font-size: 13px;
+    padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--card, transparent);
+  }
+  details.fold > summary:hover { color: var(--ink); }
+  details.fold > summary b { color: var(--ink); }
+  details.fold[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  details.fold .fold-body {
+    max-height: 320px; overflow-y: auto; border: 1px solid var(--line); border-top: 0;
+    border-radius: 0 0 10px 10px; padding: 2px 10px 8px;
+  }
   @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -1050,8 +1064,14 @@
       '</div>'
     )).join('');
     const more = info.count > 200 ? '<p class="sub">只列前 200 个，实际共 ' + info.count + ' 个。</p>' : '';
-    box.innerHTML = '<p class="sub" style="margin-top:12px">远端共 <b>' + info.count + '</b> 个族 / <b>' +
-      mb(info.bytes) + '</b>：</p>' + rows + more;
+    // 84 个族一张平铺列表会把页面撑到滑不动 —— 默认收起，点开看明细，
+    // 展开后明细区自己内部滚动。
+    box.innerHTML =
+      '<details class="fold">' +
+        '<summary>远端共 <b>' + info.count + '</b> 个族 / <b>' + mb(info.bytes) +
+          '</b> —— 点开查看明细（默认收起）</summary>' +
+        '<div class="fold-body">' + rows + more + '</div>' +
+      '</details>';
   }
 
   async function loadRestoreInfo() {
@@ -1088,9 +1108,10 @@
   $('restoreDryBtn').onclick = async () => {
     if (!needConfigured()) return;
     const r = await api('restore/dry', {});
+    LAST_RESTORE_TASK = true;
     msg($('restoreMsg'), r.ok ? '已开始预演 —— 进度在下面实时更新。' : esc(r.error || '触发失败'),
         r.ok ? 'ok' : 'bad');
-    if (r.ok) startPolling();
+    if (r.ok) { showStartingBar(true); startPolling(); }
   };
 
   $('restoreBtn').onclick = async () => {
@@ -1099,9 +1120,10 @@
     if (!tgt) { msg($('restoreMsg'), '还不知道要下载到哪里：先在上面填一个目录并保存。', 'bad'); return; }
     if (!confirm('把远端字体下载到：\n' + tgt + '\n\n会往这个目录里写文件（默认不覆盖已有的同名文件）。继续？')) return;
     const r = await api('restore', {});
-    msg($('restoreMsg'), r.ok ? '已开始下载 —— 进度在下面实时更新。' : esc(r.error || '触发失败'),
+    LAST_RESTORE_TASK = true;
+    msg($('restoreMsg'), r.ok ? '已开始下载 —— 进度条立刻出现在下面。' : esc(r.error || '触发失败'),
         r.ok ? 'ok' : 'bad');
-    if (r.ok) startPolling();
+    if (r.ok) { showStartingBar(true); startPolling(); }
   };
 
   // ── 补缺 ────────────────────────────────────────────────
@@ -1161,7 +1183,12 @@
     $('missTarget').textContent = r.target
       ? '会下载到：' + r.target
       : '还没确定下载目录 —— 先到「下载回本机」页填一个并保存。';
-    box.innerHTML = rows;
+    // 同远端列表：缺失明细默认收起，展开后内部滚动
+    box.innerHTML =
+      '<details class="fold">' +
+        '<summary>缺失明细：<b>' + r.missing.length + '</b> 个族 —— 点开查看（默认收起）</summary>' +
+        '<div class="fold-body">' + rows + '</div>' +
+      '</details>';
     msg($('missMsg'), r.downloadable
       ? '勾好之后点「下载勾选的字族」。'
       : '远端一个都没有 —— 先在原来那台电脑跑一次同步。', r.downloadable ? 'ok' : 'bad');
@@ -1177,15 +1204,19 @@
       .map((c) => c.dataset.family);
     if (!fams.length) { msg($('missMsg'), '先勾选要下载的字族。', 'bad'); return; }
     const r = await api('missing/restore', { families: fams });
+    LAST_RESTORE_TASK = true;
     msg($('missMsg'),
-      r.ok ? '已开始下载 ' + fams.length + ' 个族 —— 进度条在「下载回本机」页实时更新。'
+      r.ok ? '已开始下载 ' + fams.length + ' 个族 —— 进度条在下方「看看远程有什么」区块实时更新，结束会有成功/失败提示。'
            : esc(r.error || '触发失败'),
       r.ok ? 'ok' : 'bad');
-    if (r.ok) startPolling();
+    if (r.ok) { showStartingBar(true); startPolling(); }
   };
 
   // ── 进度 ────────────────────────────────────────────────
   let pollTimer = null;
+  // 刚点的按钮是上传还是下载 —— 后台任务没启动时（一直 idle）收尾提示
+  // 要写进对应区块的消息框
+  let LAST_RESTORE_TASK = false;
 
   const mb = (n) => ((n || 0) / 1048576).toFixed(1) + ' MB';
 
@@ -1215,10 +1246,18 @@
     }
   }
 
-  function renderProgress(p) {
-    const restore = !!(p && p.phase && (
-      p.phase.indexOf('restore-') === 0 ||
+  function isRestoreProgress(p) {
+    // 下载/恢复类任务的进度走 restore 框，上传走 sync 框。
+    // 不能只看 phase：任务刚启动时 phase 是 'starting'（_reset_progress 设的），
+    // 得靠 scope（后端写的是「恢复 …」开头）分清是哪条任务。
+    return !!(p && (
+      (p.scope || '').indexOf('恢复') === 0 ||
+      (p.phase || '').indexOf('restore-') === 0 ||
       p.phase === 'download' || p.phase === 'unpack' || p.phase === 'rescan'));
+  }
+
+  function renderProgress(p) {
+    const restore = isRestoreProgress(p);
     const box = restore ? $('restoreProgBox') : $('progressBox');
     const bar = restore ? $('restoreBar') : $('progBar');
     const txt = restore ? $('restoreText') : $('progText');
@@ -1237,25 +1276,55 @@
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
 
+  // 任务点了按钮却一直 idle：说明后台任务根本没启动（上一次同步/下载还没
+  // 结束被 SYNC_LOCK 挡了，或配置没完成）。不能静默 —— 用户看到的正是
+  // 「点了没反应、没进度条也没提示」。
+  const IDLE_GIVE_UP_TICKS = 5;
+  let idleTicks = 0;
+
   async function pollProgress() {
     const r = await api('progress');
     if (!r.ok) { stopPolling(); return; }
     const p = r.progress || {};
+    if (!p.phase || p.phase === 'idle') {
+      idleTicks++;
+      if (idleTicks >= IDLE_GIVE_UP_TICKS) {
+        stopPolling();
+        renderProgress(null);
+        const el = LAST_RESTORE_TASK ? $('restoreMsg') : $('runMsg');
+        msg(el, '任务一直没有启动：可能上一次同步/下载还在进行，或者配置还没完成。'
+          + 'FontManager 主窗口里应该弹过一条说明原因的提示。', 'bad');
+      }
+      return;
+    }
+    idleTicks = 0;
     renderProgress(p);
     if (!p.running) {
       stopPolling();
+      // 结束只画在进度条文字里用户注意不到 —— 消息区要写明成功还是失败
+      const el = isRestoreProgress(p) ? $('restoreMsg') : $('runMsg');
       if (p.phase === 'done') {
-        // 同步完成后刷新一次状态，让「已同步 N 个族」跟着变
+        msg(el, esc(p.message || '完成'), 'ok');
+        // 同步/恢复完成后刷新一次状态，让「已同步 N 个族」跟着变
         const s = await api('state');
         if (s.ok) render(s.state);
+      } else if (p.phase === 'error') {
+        msg(el, '失败：' + esc(p.error || p.message || '未知错误'), 'bad');
       }
     }
   }
 
   function startPolling() {
     stopPolling();
+    idleTicks = 0;
     pollProgress();
     pollTimer = setInterval(pollProgress, 900);
+  }
+
+  // 点下按钮就立刻亮进度条，不等第一次轮询 —— 「已开始下载」和进度条之间
+  // 不能有空档，否则用户以为没有进度条。
+  function showStartingBar(restore) {
+    renderProgress({ phase: 'starting', scope: restore ? '恢复' : '同步' });
   }
 
   $('dryBtn').onclick = async () => {
@@ -1265,9 +1334,10 @@
       return;
     }
     const r = await api('dryrun', {});
+    LAST_RESTORE_TASK = false;
     msg($('runMsg'), r.ok ? '已开始预演 —— 进度在下面实时更新。' : esc(r.error || '触发失败'),
       r.ok ? 'ok' : 'bad');
-    if (r.ok) startPolling();
+    if (r.ok) { showStartingBar(false); startPolling(); }
   };
 
   $('syncBtn').onclick = async () => {
@@ -1278,9 +1348,10 @@
     }
     if (!confirm('开始正式同步？会把变化的字族上传到 ' + ((STATE.owner || STATE.login) + '/' + STATE.repoName))) return;
     const r = await api('sync', {});
+    LAST_RESTORE_TASK = false;
     msg($('runMsg'), r.ok ? '同步已开始 —— 进度在下面实时更新（这个页面别关）。' : esc(r.error || '触发失败'),
       r.ok ? 'ok' : 'bad');
-    if (r.ok) startPolling();
+    if (r.ok) { showStartingBar(false); startPolling(); }
   };
 
   // ── 体检 ────────────────────────────────────────────────

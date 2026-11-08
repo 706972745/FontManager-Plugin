@@ -1064,6 +1064,38 @@ class PanelTests(unittest.TestCase):
         self.assertIn("settings/tokens/new?scopes=repo", html,
                       "教程里必须给「已预勾 repo」的建令牌直链")
 
+    def test_progress_feedback_is_visible(self):
+        """0.8.4 真机反馈：点「开始下载」后看不到进度条、结束没有成功/失败提示。
+
+        三条硬要求：
+          1. 点按钮立刻亮进度条（showStartingBar），不能等第一次轮询；
+          2. 结束时消息区必须写明成功/失败（pollProgress 里写 restoreMsg/runMsg）；
+          3. 后台任务没启动（一直 idle）要给说明，不能静默。
+        """
+        from pathlib import Path
+        html = (Path(HERE) / "panel.html").read_text(encoding="utf-8")
+        for anchor in ("function showStartingBar", "function isRestoreProgress",
+                       "showStartingBar(true)", "showStartingBar(false)"):
+            self.assertIn(anchor, html)
+        # 结束提示：done / error 都要落到消息区
+        self.assertIn("msg(el, esc(p.message || '完成'), 'ok')", html)
+        self.assertIn("'失败：'", html)
+        # idle 兜底
+        self.assertIn("任务一直没有启动", html)
+
+    def test_long_lists_are_collapsed_by_default(self):
+        """0.8.4 真机反馈：84 个族的远端列表平铺把页面撑到滑不动。
+
+        远端明细和补缺明细都必须用 <details class="fold"> 默认收起，
+        展开后内部滚动（fold-body 有 max-height）。
+        """
+        from pathlib import Path
+        html = (Path(HERE) / "panel.html").read_text(encoding="utf-8")
+        self.assertEqual(html.count('<details class="fold">'), 2,
+                         "远端列表与补缺列表都要是默认收起的折叠块")
+        self.assertIn("max-height: 320px", html, "展开后明细区内部滚动")
+        self.assertIn("默认收起", html)
+
 
 class SystemFontTests(unittest.TestCase):
     """Windows 自带字体绝不能进同步范围：不可再分发，也不属于字体库。"""
