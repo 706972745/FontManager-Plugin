@@ -310,6 +310,18 @@ def load_state():
     st.setdefault("families", {})
     st.setdefault("pendingDeletes", [])
     st.setdefault("lastSyncAt", 0)
+    # 多库分账（0.8.3）：把旧的扁平账迁移到 libraries["legacy"] 名下。
+    # 之后 syncer 按「字体库公共根」各自记账 —— 切换/回切字体库互不删除、不重传。
+    # legacy 账只作历史记录，不参与任何新库的删除判定（保守：宁可重传不可误删）。
+    st.setdefault("libraries", {})
+    if "legacy" not in st["libraries"] and (st.get("families") or st.get("pendingDeletes")):
+        st["libraries"] = {"legacy": {
+            "families": st.pop("families"),
+            "pendingDeletes": st.pop("pendingDeletes", []),
+        }}
+        st["families"] = {}
+        st["pendingDeletes"] = []
+        save_state(st)
     return st
 
 

@@ -219,9 +219,7 @@
 
   <nav id="nav">
     <button data-tab="account" class="on">账号与令牌</button>
-    <button data-tab="repo">同步到哪个库</button>
-    <button data-tab="restore">下载回本机</button>
-    <button data-tab="missing">补缺</button>
+    <button data-tab="sync">同步与恢复</button>
     <button data-tab="perm">权限说明</button>
     <button data-tab="guide">新手教程</button>
     <button data-tab="adv">高级</button>
@@ -271,7 +269,14 @@
   </section>
 
   <!-- ══════════ 仓库 ══════════ -->
-  <section id="tab-repo">
+  <section id="tab-sync">
+    <div class="card">
+      <h2>这一页分两件事，互不干扰</h2>
+      <p class="lead"><b>上传备份</b>：点「立即同步」把本机字体库备份到 GitHub。
+        <b>下载恢复</b>：用下面两个工具把备份拿回本机 —— <b>下载动作绝不会上传任何东西</b>，
+        你可以只下载、不同步，随你需要。</p>
+      <p class="sub">打开这一页会自动加载远端内容和快照列表，不用手动刷新。</p>
+    </div>
     <div class="card">
       <h2><span class="num">1</span>选一个库（必须是私有仓库）</h2>
       <p class="lead">字体只会上传到<b>你自己账号下的私有仓库</b>。下面两种做法任选一种，都是一步到位：</p>
@@ -375,10 +380,10 @@
       <div id="runMsg"></div>
       <p class="sub">进度和结果会以通知的形式出现在 FontManager 主界面。</p>
     </div>
-  </section>
-
-  <!-- ══════════ 下载回本机 ══════════ -->
-  <section id="tab-restore">
+  <div class="card">
+    <h2>⬇️ 下载恢复：把 GitHub 上的备份拿回本机</h2>
+    <p class="lead">上传的是字体文件本体（原文件字节不变）。下面动作<b>只下载、不同步</b>。</p>
+  </div>
     <div class="card">
       <h2><span class="num">1</span>另一台电脑怎么把字体拿回来</h2>
       <p class="lead">上传的是<b>字体文件本体</b>（原文件字节，一个不改，外加同目录的授权/说明文档），
@@ -415,10 +420,11 @@
       </div>
       <div id="restoreList"></div>
     </div>
-  </section>
-
-  <!-- ══════════ 补缺 ══════════ -->
-  <section id="tab-missing">
+  <div class="card">
+    <h2>🧩 补缺：快照里有、这台电脑上没有的字体</h2>
+    <p class="lead">在 FontManager 里<b>导入另一台电脑的快照</b>后回到这里选它 ——
+      缺失列表<b>自动加载</b>，标出哪些能直接从 GitHub 补回来。同样<b>只下载、不同步</b>。</p>
+  </div>
     <div class="card">
       <h2>快照里有、这台电脑上没有的字体</h2>
       <p class="lead">把另一台电脑的<b>快照</b>在这台 FontManager 里导入后，界面上会提示「其中 N 个本机没有」
@@ -689,12 +695,17 @@
   }
 
   // ── 页签 ────────────────────────────────────────────────
-  const tabs = ['account', 'repo', 'restore', 'missing', 'perm', 'guide', 'adv'];
+  const tabs = ['account', 'sync', 'perm', 'guide', 'adv'];
   function show(tab) {
     if (tabs.indexOf(tab) < 0) tab = 'account';
     document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
     tabs.forEach((t) => $('tab-' + t).classList.toggle('on', t === tab));
     history.replaceState(null, '', '?k=' + encodeURIComponent(KEY) + '&tab=' + tab);
+    if (tab === 'sync') {
+      // 打开这一页自动加载：远端有什么 + 快照列表，不用手动点刷新
+      loadRestoreInfo();
+      loadMissingSnaps(true);
+    }
   }
   document.querySelectorAll('nav button').forEach((b) => b.onclick = () => show(b.dataset.tab));
   document.querySelectorAll('[data-go]').forEach((b) => b.onclick = () => {
@@ -729,9 +740,21 @@
           '<span class="mask">' + (a.current ? esc(st.tokenMask) : '') + '</span>' +
           '<span class="sp"></span>' +
           (a.current ? '' : '<button class="act ghost" data-use="' + esc(a.login) + '">切换</button>') +
+          (a.current ? '<button class="act ghost" data-copy="' + esc(a.login) + '">复制令牌</button>' : '') +
           '<button class="act danger" data-drop="' + esc(a.login) + '">移除</button>' +
         '</div>'
       )).join('');
+      list.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => {
+        const r = await api('account/copy', { login: b.dataset.copy });
+        if (!r.ok) { msg($('tokenMsg'), esc(r.error || '读不到令牌'), 'bad'); return; }
+        try {
+          await navigator.clipboard.writeText(r.token);
+          msg($('tokenMsg'), '令牌已复制到剪贴板（注意保密，用完可去 GitHub 撤销）。', 'ok');
+        } catch (e) {
+          // 剪贴板权限被拒（比如非安全上下文）：退回「选中令牌框 + 显示」的老路
+          msg($('tokenMsg'), '自动复制被浏览器拒绝。点「显示」后手动选择复制。', 'warn');
+        }
+      });
       list.querySelectorAll('[data-use]').forEach((b) => b.onclick = async () => {
         const r = await api('account/select', { login: b.dataset.use });
         if (r.state) render(r.state);

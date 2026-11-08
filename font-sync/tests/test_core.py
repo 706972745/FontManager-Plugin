@@ -172,10 +172,10 @@ class StoreTests(unittest.TestCase):
     def test_state_roundtrip_creates_device_id(self):
         st = store.load_state()
         self.assertTrue(st["deviceId"])
-        st["families"]["A"] = {"hash": "h"}
+        st["libraries"].setdefault("legacy", {"families": {}})["families"]["A"] = {"hash": "h"}
         store.save_state(st)
         again = store.load_state()
-        self.assertEqual(again["families"]["A"]["hash"], "h")
+        self.assertEqual(again["libraries"]["legacy"]["families"]["A"]["hash"], "h")
         self.assertEqual(again["deviceId"], st["deviceId"])
 
     def test_config_defaults_merge(self):
@@ -999,7 +999,7 @@ class PanelTests(unittest.TestCase):
         ids = set(re.findall(r'\bid="([^"]+)"', html))
         refs = set(re.findall(r"\$\('([^']+)'\)", html))
         self.assertEqual(sorted(refs - ids), [], "JS 引用了不存在的元素 id")
-        for tab in ("account", "repo", "restore", "perm", "guide", "adv"):
+        for tab in ("account", "sync", "perm", "guide", "adv"):
             self.assertIn(f'id="tab-{tab}"', html)
         self.assertIn("settings/tokens/new?scopes=repo", html,
                       "教程里必须给「已预勾 repo」的建令牌直链")
@@ -1278,3 +1278,63 @@ class RestoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MultiLibraryLedgerTests(unittest.TestCase):
+    """多库分账（0.8.3）：切换字体库互不删除、不重传。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        layout = {"a/A.ttf": 512, "b/B.ttf": 512, "c/C.ttf": 512}
+        self.files = make_tree(self.tmp.name, layout)
+        self.cfg = {"sync": {"excludeCopyright": [], "maxFamilyBytes": 10 << 20,
+                             "deleteRemovedFamilies": True, "deleteAfterDays": 7}}
+        # 显式启用分账结构（生产环境由 load_state 迁移创建）
+        self.state = {"deviceId": "dev", "families": {}, "pendingDeletes": [],
+                      "libraries": {}}
+        self.old_state_path = store.STATE_PATH
+        store.STATE_PATH = os.path.join(self.tmp.name, "state.json")
+        self.old_ensure = syncer.ensure_repo
+        syncer.ensure_repo = lambda *a, **k: ("owner", "repo", "main")
+
+    def tearDown(self):
+        syncer.ensure_repo = self.old_ensure
+        store.STATE_PATH = self.old_state_path
+        self.tmp.cleanup()
+
+    def _faces(self, sub):
+        # 两个"库"：路径根不同 → _library_key 不同
+        return [{"path": os.path.join(self.tmp.name, sub, k, k + ".ttf"),
+                 "family": k, "source": "managed",
+                 "copyrightClass": "free"} for k in ("a", "b", "c")]
+
+    def _tree(self, sub):
+        for k in ("a", "b", "c"):
+            d = os.path.join(self.tmp.name, sub, k)
+            os.makedirs(d, exist_ok=True)
+            f = os.path.join(d, k + ".ttf")
+            if not os.path.exists(f):
+                open(f, "wb").write(b"ttf-" + sub.encode() + b"-" + k.encode())
+
+    def test_switch_library_no_delete_no_reupload(self):
+        self._tree("libA")
+        gh = FakeSyncGh()
+        state = self.state
+        syncer.run_sync(gh, FakeApi(self._faces("libA")), self.cfg, state, log=lambda *_: None)
+        ledA = state["libraries"][os.path.join(self.tmp.name, "libA").lower()]
+        self.assertEqual(len(ledA["families"]), 3)
+        # 切到库 B（全新路径）：B 首传自己的 3 个族；A 的账原样保留、远端无删除
+        self._tree("libB")
+        summary = syncer.run_sync(gh, FakeApi(self._faces("libB")), self.cfg, state,
+                                  log=lambda *_: None)
+        self.assertEqual(summary["removed"], [])
+        self.assertEqual(gh.deleted, [])
+        ledB = state["libraries"][os.path.join(self.tmp.name, "libB").lower()]
+        self.assertEqual(len(ledB["families"]), 3)
+        self.assertEqual(len(ledA["families"]), 3, "库 A 的账不被库 B 动")
+        # 回切库 A：账还在 → 全部跳过，不重传
+        summary = syncer.run_sync(gh, FakeApi(self._faces("libA")), self.cfg, state,
+                                  log=lambda *_: None)
+        self.assertEqual(len(summary.get("uploaded") or []), 0,
+                         "回切库 A 不应重传（账还在）")
+        self.assertEqual(summary["removed"], [])

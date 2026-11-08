@@ -18,10 +18,22 @@
 
 import json
 import os
+import shutil
 import sys
 import threading
 import time
 import traceback
+
+# ── 字节码缓存自清（在导入任何本地模块之前执行）──
+# 更新插件时 .py 的修改时间可能被保留成旧值，Python 会误用 __pycache__ 里
+# 旧版本的字节码 —— 表现就是「文件是新的、跑的是旧的」（面板出现 unknown
+# endpoint、进度不动，且重装插件也无法恢复）。每次启动先清掉，永绝后患。
+try:
+    _pc = os.path.join(os.path.dirname(os.path.abspath(__file__)), "__pycache__")
+    if os.path.isdir(_pc):
+        shutil.rmtree(_pc, ignore_errors=True)
+except Exception:
+    pass
 
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 if PLUGIN_DIR not in sys.path:

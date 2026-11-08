@@ -125,6 +125,7 @@ def build_plan(api, cfg, state, only_family=None, log=print):
     max_bytes = int(sync_cfg.get("maxFamilyBytes") or 400 * 1024 * 1024)
 
     faces = api.faces()
+    led = _ledger(state, faces)  # 多库切换兼容：按当前字体库取账目
     system_faces = sum(1 for f in faces if (f.get("source") or "").lower() == "system")
     groups = group_by_family(faces)
     if system_faces:
@@ -134,7 +135,7 @@ def build_plan(api, cfg, state, only_family=None, log=print):
         if not groups:
             raise RuntimeError(f"本地清单里没有这个字族：{only_family}")
 
-    known = state.get("families") or {}
+    known = _ledger(state, faces).get("families") or {}
     todo, skipped = [], {"unchanged": 0, "license": [], "tooBig": [], "noFile": []}
 
     for family, items in groups.items():
@@ -251,8 +252,13 @@ def ensure_repo(gh, cfg, state, log=print, create=True):
         # 换库防呆：families 里的指纹/assetId 是**旧库**的。留着它们的话，
         # build_plan 会把每个族都判成「未变化」直接跳过 —— 新库永远是空的，
         # 日志却显示「跳过 N 个未变化」，看着像成功。所以换库必须清空重来。
-        had = len(state.get("families") or {})
-        log(f"目标库 {prev} → {target}：清掉属于旧库的 {had} 条同步记录，按新库重新全量")
+        had = sum(len(led.get("families") or {}) for led in _iter_ledgers(state))
+        log(f"目标库 {prev} → {target}：清掉属于旧仓库的 {had} 条同步记录，按新仓库重新全量")
+        for led in _iter_ledgers(state):
+            # 远端仓库都换了，所有库的账都指向旧仓库，全部作废
+            led["families"] = {}
+            led["pendingDeletes"] = []
+            led.pop("lastGone", None)
         state["families"] = {}
         # 旧库的待删 asset id 在新库里指向别的东西，绝不能带过去
         state["pendingDeletes"] = []
@@ -320,6 +326,44 @@ def _report(progress, phase, **fields):
         pass
 
 
+def _library_key(faces):
+    """当前字体库的标识：managed 字体路径的公共根目录。多库切换各记各的账。"""
+    dirs = sorted({os.path.dirname(os.path.abspath(f.get("path") or "")).lower()
+                   for f in (faces or [])
+                   if (f.get("source") or "").lower() == "managed" and f.get("path")})
+    if not dirs:
+        return "empty"
+    try:
+        return os.path.commonpath(dirs).lower()
+    except ValueError:
+        return "mixed"
+
+
+def _ledger(state, faces):
+    """取「当前字体库」的同步账目（families / pendingDeletes / lastGone）。
+
+    - 新结构（state["libraries"] 按 <库根> 分键）：切换/回切字体库互不删除、不重传；
+    - 旧扁平结构（没有 libraries 键）：原样返回 state —— 兼容老 state 与既有测试。
+    """
+    libs = state.get("libraries")
+    if not isinstance(libs, dict):
+        return state
+    led = libs.setdefault(_library_key(faces), {})
+    led.setdefault("families", {})
+    led.setdefault("pendingDeletes", [])
+    return led
+
+
+def _iter_ledgers(state):
+    """所有账目：兼容扁平结构时先给 state 本身，再给每个库的账。"""
+    yield state
+    libs = state.get("libraries")
+    if isinstance(libs, dict):
+        for led in libs.values():
+            if isinstance(led, dict):
+                yield led
+
+
 def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
              progress=None, max_families=None):
     """跑一次同步。返回汇总字典。
@@ -328,6 +372,8 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
     一口气跑完容易中途断网、也看不到阶段性成果；分批传，剩下的下一轮继续。
     """
     sync_cfg = cfg.get("sync") or {}
+    # 多库切换兼容：按当前字体库取账目（多调一次 /fonts 只为算库标识）
+    led = _ledger(state, api.faces())
     delete_after = int(sync_cfg.get("deleteAfterDays") or 7) * 86400
     batch = max(1, int(sync_cfg.get("batchFamilies") or 100))
 
@@ -350,25 +396,25 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
             gone = []
         else:
             ok, why = _safe_to_remove(skipped.get("localFamilies") or 0,
-                                      len(state.get("families") or {}), gone)
+                                      len(led.get("families") or {}), gone)
             if not ok:
                 # 保险丝触发：账**不能清**（本地清单不可信，清了会把真删除也抹掉），
                 # 但同一批缺席每轮都念叨一遍就是噪音 —— 按「缺席集合」去重提示。
                 fp = hashlib.sha256(",".join(gone).encode("utf-8")).hexdigest()[:16]
-                prev = state.get("lastGone") or {}
+                prev = led.get("lastGone") or {}
                 if prev.get("key") == fp:
                     log(f"⚠️ 与上一轮完全相同：仍有 {len(gone)} 个族缺席"
                         f"（保险丝生效中，本轮不删任何远端内容）")
                 else:
                     log(f"⚠️ 跳过删除：{why}")
-                state["lastGone"] = {"key": fp, "at": int(time.time()), "count": len(gone)}
+                led["lastGone"] = {"key": fp, "at": int(time.time()), "count": len(gone)}
                 gone = []
                 fused = True
             else:
                 log(f"本地少了 {len(gone)} 个族，本轮会一并删掉远端备份（可在设置里关掉）")
-    if not fused and not gone and state.get("lastGone"):
+    if not fused and not gone and led.get("lastGone"):
         # 清单恢复正常（或没有缺席了）：解除去重记忆，下次再触发时重新完整提示
-        state.pop("lastGone", None)
+        led.pop("lastGone", None)
     if dry_run:
         state["lastPlan"] = {"at": int(time.time()),
                              "families": [{"family": e["family"], "bytes": e["bytes"]}
@@ -397,10 +443,10 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
             try:
                 meta = packer.pack_family(os.path.join(tmpdir, "f.zip"), item["paths"],
                                           family=family)
-                prev = (state["families"].get(family) or {})
+                prev = (led["families"].get(family) or {})
                 if prev.get("hash") == meta["hash"] and prev.get("asset"):
                     log(f"  内容未变（只动了时间戳）：{family}")
-                    state["families"][family] = dict(prev, fingerprint=item["fingerprint"])
+                    led["families"][family] = dict(prev, fingerprint=item["fingerprint"])
                     continue
                 if release_id is None or len(entries) >= 888:
                     release_id, bucket_tag = gh.find_or_create_bucket(owner, name)
@@ -420,10 +466,10 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
                 # 无论新传还是撞名都要记账
                 old = prev.get("assetId")
                 if old and old != asset_id:
-                    state["pendingDeletes"].append(
+                    led["pendingDeletes"].append(
                         {"assetId": old, "name": prev.get("asset"),
                          "deleteAfter": int(time.time()) + delete_after})
-                state["families"][family] = {
+                led["families"][family] = {
                     "fingerprint": item["fingerprint"], "hash": meta["hash"],
                     "asset": asset, "assetId": asset_id, "bucket": bucket_tag,
                     "size": meta["size"], "fonts": meta["fonts"],
@@ -459,16 +505,16 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
     for position, family in enumerate(gone, start=1):
         _report(progress, "delete", done=position, total=len(gone), family=family,
                 index=position, bytes=summary["bytes"], bytesTotal=total_bytes)
-        info = state["families"].get(family) or {}
+        info = led["families"].get(family) or {}
         asset_id = info.get("assetId")
         if not asset_id:
             # 只有记账没有 asset（上次传失败或旧格式），本地记录清掉即可
-            state["families"].pop(family, None)
+            led["families"].pop(family, None)
             summary["removed"].append({"family": family, "asset": "", "hash": ""})
             continue
         try:
             gh.delete_asset(owner, name, asset_id)
-            state["families"].pop(family, None)
+            led["families"].pop(family, None)
             summary["removed"].append({"family": family, "asset": info.get("asset") or "",
                                        "hash": info.get("hash") or ""})
             log(f"  − 远端已删（本地不存在了）：{family}")
@@ -502,20 +548,24 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
 
 
 def flush_pending_deletes(gh, state, owner, name, log=print):
-    """把到期的旧 asset 真的删掉。7 天窗口就是在这里生效的。"""
-    keep, deleted = [], 0
-    for item in state.get("pendingDeletes") or []:
-        if int(item.get("deleteAfter") or 0) > int(time.time()):
-            keep.append(item)
-            continue
-        try:
-            gh.delete_asset(owner, name, item["assetId"])
-            deleted += 1
-            log(f"  已删除过期 asset：{item.get('name')}")
-        except Exception as e:
-            log(f"  删除 {item.get('name')} 失败：{e}")
-            keep.append(item)
-    state["pendingDeletes"] = keep
+    """把到期的旧 asset 真的删掉。7 天窗口就是在这里生效的。
+    多库分账后每个库有自己的待删列表，这里全部一起处理（asset 都在同一个仓库）。"""
+    deleted = 0
+    for led in _iter_ledgers(state):
+        keep, done = [], 0
+        for item in led.get("pendingDeletes") or []:
+            if int(item.get("deleteAfter") or 0) > int(time.time()):
+                keep.append(item)
+                continue
+            try:
+                gh.delete_asset(owner, name, item["assetId"])
+                done += 1
+                log(f"  已删除过期 asset：{item.get('name')}")
+            except Exception as e:
+                log(f"  删除 {item.get('name')} 失败：{e}")
+                keep.append(item)
+        led["pendingDeletes"] = keep
+        deleted += done
     return deleted
 
 
@@ -668,9 +718,12 @@ def run_restore(gh, api, cfg, state, dry_run=False, overwrite=False, only=None,
     """从 GitHub 把字体包下载回本机字体库，然后让主程序重扫。"""
     _report(progress, "restore-scan")
     faces = api.faces()
-    # 这里连系统字体一起算「本机已有」：远端万一有同名字族，不该重复下一份到库里
-    local_families = list(group_by_family(faces, library_only=False).keys())
-    log(f"本机现有 {len(local_families)} 个字族，{len(faces)} 个字体文件")
+    # 只认**字体库**里的族算「本机已有」：C://Windows//Fonts 的系统字体不算数 ——
+    # 否则远端备份里同名的库字体会被系统字体占位跳过，用户永远拿不回来
+    # （2026-11-08 真 bug：新库里只有系统字体时，恢复把所有包都标成「本地已有」）
+    local_families = list(group_by_family(faces, library_only=True).keys())
+    led = _ledger(state, faces)
+    log(f"本机字体库现有 {len(local_families)} 个字族（系统字体不计），{len(faces)} 个字体文件")
 
     owner, name, _branch = ensure_repo(gh, cfg, state, log, create=False)
     _report(progress, "restore-plan")
@@ -728,7 +781,7 @@ def run_restore(gh, api, cfg, state, dry_run=False, overwrite=False, only=None,
                         {"family": family, "path": p} for p in res["conflicts"])
                     log(f"  ! {family}：{len(res['conflicts'])} 个文件本机已有且内容不同，"
                         f"未覆盖（要覆盖请勾「覆盖本机同名文件」）")
-                state["families"][family] = {
+                led["families"][family] = {
                     "hash": digest, "asset": row["asset"], "assetId": row["assetId"],
                     "bucket": row["tag"], "size": size,
                     "fonts": len(res["fonts"]) + len(res["skipped"]),

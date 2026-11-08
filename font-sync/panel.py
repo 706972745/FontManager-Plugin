@@ -340,12 +340,20 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             rows = syncer.list_remote(client, owner, name, log=lambda *_a: None)
         except Exception as e:
-            return {"ok": False, "error": f"读不到 {owner}/{name}：{e}"}
+            msg = f"读不到 {owner}/{name}：{e}"
+            if "404" in str(e):
+                msg = (f"备份仓库 {owner}/{name} 不存在（可能已被删除）。"
+                       f"到上面「选一个库」重新选或新建一个 —— 首次同步会自动重建私有仓。")
+            return {"ok": False, "error": msg}
         total = sum(r["size"] for r in rows)
         st = store.load_state()
         # state.families 的键是**原始族名**，asset 名是 slug —— 两边都过归一化再比，
-        # 顺带兼容老包被 GitHub 改写的名字（`!`→`.`）
-        synced = {packer.slug_key(k) for k in (st.get("families") or {})}
+        # 顺带兼容老包被 GitHub 改写的名字（`!`→`.`）。
+        # 多库分账（0.8.3）：所有库的账取并集 —— 任一库同步过的都算「本机有记录」。
+        all_fams = dict(st.get("families") or {})
+        for led in (st.get("libraries") or {}).values():
+            all_fams.update(led.get("families") or {})
+        synced = {packer.slug_key(k) for k in all_fams}
         for row in rows:
             row["synced"] = packer.slug_key(row["slug"]) in synced
         return {"ok": True, "owner": owner, "name": name, "count": len(rows),
@@ -475,6 +483,15 @@ class _Handler(BaseHTTPRequestHandler):
             ok = store.set_current(login)
             store.save_config({"account": login})
             return self._json({"ok": bool(ok), "state": snapshot()})
+
+        if path == "/api/account/copy":
+            # 用户要求：账号行一键复制完整令牌。面板服务只监听 127.0.0.1、
+            # 且要一次性 key 才能进到这里；令牌本身也是本机 DPAPI 存的。
+            login = str(data.get("login") or "").strip()
+            tok = store.token_for(login or None)
+            if not tok:
+                return self._json({"ok": False, "error": f"没有 {login or '当前账号'} 的令牌"})
+            return self._json({"ok": True, "token": tok})
 
         if path == "/api/account/remove":
             login = str(data.get("login") or "")
