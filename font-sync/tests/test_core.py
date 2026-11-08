@@ -1156,6 +1156,39 @@ class PanelTests(unittest.TestCase):
         self.assertIn("默认收起", html)
 
 
+    def test_do_restore_single_family_scope_not_mangled(self):
+        """右键字族菜单传字符串族名：scope 里不许出现「S、o、m」这种逐字符拼接。"""
+        import contextlib
+        import io
+        import main as m
+        old = (m.require_configured, m.local_api, m.gh_client, m.syncer.run_restore)
+        m.require_configured = lambda interactive=True: True
+        m.local_api = lambda: object()
+        m.gh_client = lambda login=None: object()
+        captured = {}
+
+        def fake_run_restore(*a, **k):
+            captured["only"] = k.get("only")
+            return {"downloaded": 1, "bytes": 10, "failed": [],
+                    "conflicts": [], "planned": 1}
+
+        m.syncer.run_restore = fake_run_restore
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                m.do_restore("SomeFamily", dry_run=False)
+        finally:
+            (m.require_configured, m.local_api, m.gh_client,
+             m.syncer.run_restore) = old
+            with m._PROGRESS_LOCK:
+                m.PROGRESS.update({"phase": "idle", "message": "", "error": ""})
+        out = buf.getvalue()
+        self.assertIn("SomeFamily", out, "开始恢复的提示里要有完整族名")
+        self.assertNotIn("S、o", out, "scope 不许把族名逐字符拼接")
+        self.assertEqual(captured["only"], ["SomeFamily"],
+                         "run_restore 收到的 only 应是单元素列表")
+
+
 class TaskThreadTests(unittest.TestCase):
     """0.8.5 真机翻车：面板全量恢复传 None，do_restore 在 _reset_progress
     之前 `only[:3]` 就 TypeError，守护线程无声死亡 —— 进度永远 idle、界面

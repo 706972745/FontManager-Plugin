@@ -61,8 +61,9 @@ MENU_OPEN = "打开同步状态目录"
 
 # ── 协议 ────────────────────────────────────────────────────────────────
 def emit(kind, message):
-    sys.stdout.write(json.dumps({"type": kind, "message": message}, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    with _STDOUT_LOCK:
+        sys.stdout.write(json.dumps({"type": kind, "message": message}, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
 
 
 def log(message):
@@ -128,6 +129,80 @@ PROGRESS = {
     "startedAt": 0, "updatedAt": 0, "finishedAt": 0,
 }
 _PROGRESS_LOCK = threading.Lock()
+_STDOUT_LOCK = threading.Lock()
+
+
+def _mb(n):
+    return f"{(n or 0) / 1048576:.1f} MB"
+
+
+def _progress_plain_text(snap):
+    """主页面底部进度条的文字（纯文本，不要 HTML）。"""
+    phase = snap.get("phase") or ""
+    total = snap.get("total") or 0
+    done = snap.get("done") or 0
+    family = snap.get("family") or ""
+    if phase == "starting":
+        return "正在启动…"
+    if phase == "scan":
+        return "正在读取字体清单、逐个算指纹…"
+    if phase == "plan":
+        return f"计划 {total} 个族 / {_mb(snap.get('bytesTotal'))}，开始处理…"
+    if phase == "connect":
+        return "正在核对目标仓库（私有性、匿名可读）…"
+    if phase == "pack":
+        return f"打包 {done}/{total}：{family}"
+    if phase == "upload":
+        return f"上传 {done}/{total}（{_mb(snap.get('bytes'))} / {_mb(snap.get('bytesTotal'))}）"
+    if phase == "delete":
+        return f"删除远端已删字族 {done}/{total}：{family}"
+    if phase == "restore-scan":
+        return "正在读取本机字体清单…"
+    if phase == "restore-plan":
+        return snap.get("message") or "正在比对远端与本机…"
+    if phase == "download":
+        return f"下载 {done}/{total}（{_mb(snap.get('bytes'))} / {_mb(snap.get('bytesTotal'))}）：{family}"
+    if phase == "unpack":
+        return f"写入本机 {done}/{total}：{family}"
+    if phase == "rescan":
+        return "让 FontManager 重新扫描字体库…"
+    if phase == "failed":
+        return f"失败跳过 {family}：{snap.get('message') or ''}（{done}/{total}）"
+    if phase == "done":
+        return snap.get("message") or "完成"
+    if phase == "error":
+        return f"失败：{snap.get('error') or snap.get('message') or '未知错误'}"
+    return ""
+
+
+def _emit_progress_line():
+    """把当前进度发一条给主程序（1.4.8+ 会转到主页面底部进度条；
+    老主程序忽略未知消息类型，无副作用）。"""
+    with _PROGRESS_LOCK:
+        snap = dict(PROGRESS)
+    running = snap["phase"] not in ("idle", "done", "error")
+    if snap["phase"] == "idle":
+        return
+    total = snap.get("total") or 0
+    percent = None
+    if not running:
+        percent = 100
+    elif total:
+        percent = max(0, min(100, round(done_of(snap) / total * 100)))
+    line = {"type": "progress",
+            "text": _progress_plain_text(snap),
+            "percent": percent,
+            "running": running}
+    try:
+        with _STDOUT_LOCK:
+            sys.stdout.write(json.dumps(line, ensure_ascii=False) + "\n")
+            sys.stdout.flush()
+    except Exception:
+        pass  # 主程序不在了也别让进度上报弄死任务
+
+
+def done_of(snap):
+    return snap.get("done") or 0
 
 
 def _reset_progress(dry_run, scope):
@@ -137,6 +212,7 @@ def _reset_progress(dry_run, scope):
                          "done": 0, "total": 0, "index": 0, "family": "",
                          "bytes": 0, "bytesTotal": 0, "message": "", "error": "",
                          "startedAt": now, "updatedAt": now, "finishedAt": 0})
+    _emit_progress_line()
 
 
 def _on_progress(phase, **fields):
@@ -149,6 +225,7 @@ def _on_progress(phase, **fields):
         PROGRESS["updatedAt"] = now
         if phase in ("done", "error"):
             PROGRESS["finishedAt"] = now
+    _emit_progress_line()
 
 
 def progress_snapshot():
@@ -223,7 +300,12 @@ def run_async(func, *args, **kwargs):
 # ── 恢复任务（从 GitHub 下载回本机） ────────────────────────────────────
 def do_restore(only_family=None, dry_run=False):
     """恢复：单个族（右键菜单）、多个族（面板「补缺」）或全部（None）。"""
-    only = list(only_family) if isinstance(only_family, (list, tuple)) else only_family
+    if isinstance(only_family, str):        # 右键字族菜单传单个族名
+        only = [only_family]
+    elif isinstance(only_family, (list, tuple)):
+        only = list(only_family)
+    else:
+        only = only_family
     if not require_configured():
         return
     if not SYNC_LOCK.acquire(blocking=False):
@@ -365,8 +447,12 @@ def self_check():
         log("目标仓库：还没填 —— 插件在设置好之前不会同步任何内容")
 
     state = store.load_state()
-    log(f"设备号：{state['deviceId']}；已同步 {len(state['families'])} 个族；"
-        f"待删旧 asset {len(state['pendingDeletes'])} 个")
+    all_fams = set(state.get("families") or {})
+    for led in (state.get("libraries") or {}).values():
+        if isinstance(led, dict):
+            all_fams.update(led.get("families") or {})
+    log(f"设备号：{state['deviceId']}；账本记录 {len(all_fams)} 个族；"
+        f"待删旧 asset {len(state.get('pendingDeletes') or [])} 个")
     if not store.configured():
         # 首次使用：只在真的动手时才弹面板，启动时给一句提示就够了
         toast("还没设置 GitHub 库：右键本插件 →「设置 GitHub 库…」（有权限说明和教程）")
@@ -375,6 +461,26 @@ def self_check():
 
 
 # ── 钩子分派 ────────────────────────────────────────────────────────────
+def start_task_with_progress(fn, args=(), dry_run=False, scope=""):
+    """右键菜单触发的同步/下载：任务照常在后台跑，进度通过 progress 消息
+    显示在**主程序主页面底部**的进度条上（1.4.8+；老主程序忽略该消息，
+    退回只有开始/结束弹窗提示的行为）。任务被 SYNC_LOCK 挡住（上一轮还在
+    跑）时，3 秒后把停在 starting 的进度放回 idle，别在主页面挂一条假进度。"""
+    _reset_progress(dry_run, scope or ("预演" if dry_run else "任务"))
+    started_at = PROGRESS.get("startedAt")
+    run_async(fn, *args)
+
+    def guard():
+        time.sleep(3)
+        with _PROGRESS_LOCK:
+            if PROGRESS.get("startedAt") == started_at and PROGRESS["phase"] == "starting":
+                now = int(time.time() * 1000)
+                PROGRESS.update({"phase": "idle", "message": "", "error": "",
+                                 "finishedAt": now, "updatedAt": now})
+
+    threading.Thread(target=guard, daemon=True).start()
+
+
 def handle_invoke(hook, payload):
     payload = payload or {}
     if hook == "settings":
@@ -400,28 +506,28 @@ def handle_invoke(hook, payload):
             toast(f"打不开：{e}")
         return
     if menu.startswith(MENU_DRYRUN):
-        run_async(do_sync, None, True)
+        start_task_with_progress(do_sync, (None, True), dry_run=True, scope="同步 预演")
         return
     if menu.startswith(MENU_RESTORE_DRY):
-        run_async(do_restore, None, True)
+        start_task_with_progress(do_restore, (None, True), dry_run=True, scope="恢复 预演")
         return
     if menu.startswith(MENU_RESTORE):
-        run_async(do_restore)
+        start_task_with_progress(do_restore, scope="恢复 全部字族")
         return
     if menu.startswith(MENU_ALL):
-        run_async(do_sync)
+        start_task_with_progress(do_sync, scope="同步 全部字族")
         return
     if menu.startswith(MENU_FAMILY):
         if not family:
             log("这个菜单需要在某个字族上右键")
             return
-        run_async(do_sync, family, False)
+        start_task_with_progress(do_sync, (family, False), scope="同步 " + family)
         return
     if menu.startswith(MENU_RESTORE_FAMILY):
         if not family:
             log("这个菜单需要在某个字族上右键")
             return
-        run_async(do_restore, family, False)
+        start_task_with_progress(do_restore, (family, False), scope="恢复 " + family)
         return
     log(f"未知菜单项：{menu}")
 
