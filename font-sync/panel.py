@@ -456,6 +456,11 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json({"ok": False, "error": str(e)}, 200)
 
     def _dispatch(self, path, data):
+        # restore/info 是只读端点，历史上注册在 do_GET；前端 api() 助手把它
+        # 发成 POST（read 白名单只有 state/progress），两边一旦错位就 404。
+        # 这里 GET/POST 都收，路由永不因方法不对而失联。
+        if path == "/api/restore/info":
+            return self._json(self._restore_info())
         # ── 账号 ──────────────────────────────────────────────
         if path == "/api/account/test":
             token = str(data.get("token") or "").strip()

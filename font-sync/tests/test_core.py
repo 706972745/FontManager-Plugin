@@ -992,6 +992,66 @@ class PanelTests(unittest.TestCase):
                 bad.append(name)
         self.assertEqual(bad, [], f"这些调用没传参数，可能被发成 GET：{bad}")
 
+    def test_panel_routes_match_frontend_methods(self):
+        """前后端路由奇偶校验：html api() 里每个端点，后端必须真有对应路由。
+
+        0.8.3 真机翻过车：restore/info 注册在 do_GET，前端 api() 却把它
+        发成 POST → 每次点「刷新远程内容」都 404 unknown endpoint，还被
+        误导成「进程没重启」。这条测试盯死三件事：
+          1. html 的 read 白名单 ⊆ 后端 GET 路由；
+          2. 其余 api() 调用 ⊆ 后端 POST 路由；
+          3. read 白名单与后端可用的路由双向一致（防只改一边）。
+        """
+        import re
+        from pathlib import Path
+        html = (Path(HERE) / "panel.html").read_text(encoding="utf-8")
+        py = (Path(HERE) / "panel.py").read_text(encoding="utf-8")
+        m = re.search(r"const read = (.*?);", html)
+        self.assertIsNotNone(m, "html 里找不到 api() 的 read 判定")
+        # 从 read 表达式里抠出白名单：path === 'xxx' || ...
+        read_set = set(re.findall(r"path === '([^']+)'", m.group(1)))
+        calls = set(re.findall(r"api\('([^']+)'", html))
+        get_routes = set(re.findall(r'parsed\.path == "(/api/[^"]+)"', py))
+        post_routes = set(re.findall(r'if path == "(/api/[^"]+)":', py))
+        for c in calls:
+            ep = "/api/" + c
+            if c in read_set:
+                self.assertIn(ep, get_routes,
+                              f"{c} 在 read 白名单里但后端没有 GET 路由")
+            else:
+                self.assertIn(ep, post_routes,
+                              f"{c} 前端发 POST 但后端没有 POST 路由（会 404 unknown endpoint）")
+        # 后端 _dispatch 对 restore/info 做了 POST 兼容；GET/POST 双注册不报错，
+        # 但 read 白名单里的端点两边都得认识，防止哪天一边悄悄改名。
+        for c in read_set:
+            self.assertIn(c, calls, f"read 白名单里的 {c} 前端并没有调用")
+
+    def test_restore_info_accepts_post_and_get(self):
+        """restore/info 曾经只注册在 do_GET，前端发 POST 直接 404 unknown
+        endpoint（真机截图复现过）。后端现在 GET/POST 都得接，且都不许再
+        回 unknown endpoint。"""
+        import urllib.error
+        import urllib.request
+
+        panel = self.panel_mod.Panel({}).start()
+        base = f"http://127.0.0.1:{panel.port}"
+        try:
+            for method in ("GET", "POST"):
+                req = urllib.request.Request(
+                    base + "/api/restore/info",
+                    data=None if method == "GET" else b"{}",
+                    headers={"X-Panel-Key": panel.key,
+                             "Content-Type": "application/json"},
+                    method=method)
+                with urllib.request.urlopen(req) as r:
+                    body = json.loads(r.read().decode("utf-8"))
+                self.assertEqual(r.status, 200, f"{method} 应当 200")
+                self.assertFalse(body.get("ok"), f"{method} 无账号时应报业务错")
+                self.assertNotEqual(body.get("error"), "unknown endpoint",
+                                    f"{method} 不许再回 unknown endpoint")
+        finally:
+            panel.stop()
+
     def test_panel_html_ids_are_all_defined(self):
         import re
         from pathlib import Path

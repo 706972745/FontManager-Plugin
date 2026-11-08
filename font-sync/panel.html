@@ -657,7 +657,9 @@
     // 只有读状态用 GET，其余动作一律 POST —— 别用「有没有 body」来猜方法：
     // 曾经 dryrun / sync 因为没传 body 被发成 GET，后端只在 POST 分支处理，
     // 于是点了按钮只回一句 unknown endpoint。
-    const read = path === 'state' || path === 'progress';
+    // restore/info 也是只读（列远端字体族），必须和后端 do_GET 白名单一致；
+    // 后端 _dispatch 另做了 POST 兼容，但两边约定保持一致才不踩坑。
+    const read = path === 'state' || path === 'progress' || path === 'restore/info';
     let res;
     try {
       res = await fetch('/api/' + path, {
