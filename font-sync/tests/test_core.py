@@ -202,7 +202,9 @@ class StoreTests(unittest.TestCase):
 
     def test_plugin_dir_never_contains_a_token(self):
         """用户口径：插件 ZIP / 插件目录里翻不到任何令牌。"""
-        store.upsert_account("alice", "ghp_top_secret_should_never_be_in_plugin_0001")
+        if not store.upsert_account("alice", "ghp_top_secret_should_never_be_in_plugin_0001"):
+            # Linux CI 没有 DPAPI / 凭据管理器，令牌只留内存、本来就不落盘
+            self.skipTest("这台机器没有 DPAPI / 凭据管理器（令牌只在内存里）")
         store._reset_cache()
         for name in os.listdir(os.path.dirname(store.SECRET_PATH)):
             path = os.path.join(os.path.dirname(store.SECRET_PATH), name)
