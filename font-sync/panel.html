@@ -361,8 +361,10 @@
       <div class="row" style="align-items:flex-start">
         <label style="display:flex;gap:8px;align-items:flex-start;flex:1 1 100%">
           <input type="checkbox" id="excludeUnknown" style="margin-top:4px">
-          <span>不同步<b>「版权未知」</b>的字族（默认开启，建议保持）
-            <span class="sub" style="display:block">判不清授权的字体不上云，是给账号留退路。</span></span>
+          <span>不同步<b>「版权未知」</b>的字族（默认开启）
+            <span class="sub" style="display:block">判不清授权的字体不上云，是给账号留退路。
+              <b>注意：个人字库通常有九成以上属于「版权未知」</b>，开着它预演只会剩几百个族。
+              想把整个字库都备份到自己的私有仓，就<b>关掉这一项</b>再预演一次。</span></span>
         </label>
       </div>
       <div class="row" style="align-items:flex-start">
@@ -389,7 +391,9 @@
 
     <div class="card">
       <h2><span class="num">3</span>试试看</h2>
-      <p>配好之后先<b>预演</b>：只统计要传多少族、多大，不打包不上传。确认数字合理再正式同步。</p>
+      <p>配好之后先<b>预演</b>：只统计要传多少族、多大，不打包不上传。确认数字合理再正式同步。
+        <span class="sub" style="display:block">预演结果会写成「全库 N 族 → 本次会传 M 族（跳过 …）」；
+          如果 M 比全库小很多，看括号里跳过的原因（多半是上面的「版权未知」开关）。</span></p>
       <div class="row">
         <button class="act ghost" id="dryBtn" type="button">预演一次（不传）</button>
         <button class="act" id="syncBtn" type="button">立即同步（全部）</button>
@@ -656,17 +660,23 @@
       验证通过后的 5 分钟内可以操作；<b>下载字体不需要验证</b>。插件不会看到你的 GitHub 密码。</p>
 
     <div id="verifyClientBox" style="display:none;margin-bottom:14px">
-      <p style="margin:0 0 8px"><b>第一次使用需要建一个 OAuth App（只需公开的 Client ID，不需要密钥）：</b></p>
+      <p style="margin:0 0 8px"><b>第一次使用需要建一个 OAuth App（只需要公开的 Client ID，不要粘 Client secret）：</b></p>
       <ol style="margin:0 0 10px;padding-left:20px">
         <li>打开 <a href="https://github.com/settings/developers" target="_blank" rel="noreferrer">GitHub → Developer settings → OAuth Apps</a>，点 <b>New OAuth App</b></li>
         <li>名称随便填；Homepage URL 与 Authorization callback URL 都填 <code>http://localhost</code>（Device Flow 用不到回调，但表单必填）</li>
-        <li>创建后复制 <b>Client ID</b>，粘到下面保存</li>
+        <li><b>创建后一定要勾上 <code>Enable Device Flow</code>，再点 <code>Update application</code></b>
+          ——漏了这一步 GitHub 会直接回 400，验证永远开不起来（这就是「连不上 GitHub」的真身）</li>
+        <li>回到应用页面复制 <b>Client ID</b>，粘到下面点「保存并继续」</li>
       </ol>
       <div class="row">
-        <input id="verifyClientId" placeholder="例如 Iv1.xxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false">
+        <input id="verifyClientId" placeholder="例如 Ov23li… 或 Iv1.…" autocomplete="off" spellcheck="false">
+        <button class="act ghost" id="verifyProbeClient" type="button">先检测</button>
         <button class="act" id="verifySaveClient" type="button">保存并继续</button>
       </div>
       <div id="verifyClientMsg" class="sub"></div>
+      <p class="sub" style="margin:10px 0 0">不想建 OAuth App？也可以用本机已保存的令牌做一次 GitHub 身份校验：
+        <button class="act ghost" id="verifyUseToken" type="button" style="margin-left:6px">改用令牌校验</button></p>
+      <div id="verifyTokenMsg" class="sub"></div>
     </div>
 
     <div id="verifySteps" style="display:none;margin-bottom:14px">
@@ -674,6 +684,9 @@
         用 <b id="verifyLogin2">对应账号</b> 登录，输入这个一次性验证码：</p>
       <div id="verifyCode" style="font-size:28px;letter-spacing:6px;font-weight:700;padding:10px 14px;border:1px dashed #888;border-radius:10px;text-align:center;margin-bottom:10px"></div>
       <div id="verifyStatus" class="sub">等待你在 GitHub 上确认…</div>
+      <div id="verifyFallback" style="display:none;margin-top:10px">
+        <button class="act ghost" id="verifyUseToken2" type="button">改用本机令牌校验</button>
+      </div>
     </div>
 
     <div style="display:flex;gap:8px;justify-content:flex-end">
@@ -1487,13 +1500,24 @@
   async function beginVerify() {
     $('verifyClientBox').style.display = 'none';
     $('verifySteps').style.display = 'none';
+    $('verifyFallback').style.display = 'none';
+    $('verifyTokenMsg').textContent = '';
     let r;
     try { r = await api('verify/start', {}); }
     catch (e) { $('verifyStatus').textContent = '连不上 GitHub：' + e; return; }
     if (!r.ok) {
       if (r.needClientId) { $('verifyClientBox').style.display = 'block'; return; }
+      // 不能只丢一句「失败」：device_flow_disabled / bad_client_id 都是用户
+      // 自己能修的（去勾 Device Flow / 重新复制 Client ID），要让入口露出来。
+      const kind = r.kind || '';
       $('verifySteps').style.display = 'block';
-      $('verifyStatus').textContent = esc(r.error || '无法开始验证');
+      $('verifyStatus').textContent = r.error || '无法开始验证';
+      $('verifyFallback').style.display = 'block';
+      if (kind === 'device_flow_disabled' || kind === 'bad_client_id') {
+        $('verifyClientBox').style.display = 'block';
+        $('verifyClientMsg').textContent = r.error || '';
+        $('verifyClientId').value = (STATE && STATE.clientId) || '';
+      }
       return;
     }
     $('verifyCode').textContent = r.userCode || '';
@@ -1520,6 +1544,37 @@
     });
   }
   $('verifyCancel').onclick = () => { void api('verify/cancel', {}); finishVerify(false); };
+
+  // 自检 Client ID：保存前先确诊「能用 / 没开 Device Flow / 不存在」，
+  // 免得用户把「GitHub 拒绝」当成「网络连不上」反复重试。
+  $('verifyProbeClient').onclick = async () => {
+    const cid = ($('verifyClientId').value || '').trim();
+    if (!cid) { $('verifyClientMsg').textContent = '先粘贴 Client ID'; return; }
+    $('verifyClientMsg').textContent = '正在问 GitHub…';
+    let r;
+    try { r = await api('verify/probe', { clientId: cid }); }
+    catch (e) { $('verifyClientMsg').textContent = '检测失败：' + e; return; }
+    $('verifyClientMsg').textContent = r.ok
+      ? '✅ ' + (r.message || 'Client ID 可用')
+      : '❌ ' + (r.error || '这个 Client ID 用不了');
+  };
+
+  // 没有 OAuth App 时的降级路径：用保险箱里的令牌向 GitHub 确认身份。
+  async function useTokenVerify(target) {
+    target.textContent = '正在用本机令牌向 GitHub 确认身份…';
+    let r;
+    try { r = await api('verify/token', {}); }
+    catch (e) { target.textContent = '校验失败：' + e; return; }
+    if (r.ok) {
+      target.textContent = '✅ 已通过 ' + (r.login || '') + ' 的令牌校验';
+      setTimeout(() => finishVerify(true), 500);
+      return;
+    }
+    target.textContent = '❌ ' + (r.error || '校验没通过');
+  }
+  $('verifyUseToken').onclick = () => { void useTokenVerify($('verifyTokenMsg')); };
+  $('verifyUseToken2').onclick = () => { void useTokenVerify($('verifyStatus')); };
+
   $('verifySaveClient').onclick = async () => {
     const cid = ($('verifyClientId').value || '').trim();
     if (!cid) { $('verifyClientMsg').textContent = '先粘贴 Client ID'; return; }

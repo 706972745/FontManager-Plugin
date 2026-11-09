@@ -267,7 +267,9 @@ def do_sync(only_family=None, dry_run=False):
         summary = syncer.run_sync(client, api, cfg, state, only_family=only_family,
                                   dry_run=dry_run, log=log, progress=_on_progress)
         if dry_run:
-            toast(f"预演完成：{summary['planned']} 个族待传，未上传任何内容")
+            # 带上分母与跳过原因：只报「263 个族」会被当成「插件只认了 263 个族」
+            toast(summary.get("preview")
+                  or f"预演完成：{summary['planned']} 个族待传，未上传任何内容")
         else:
             msg = f"同步完成：上传 {summary['uploaded']} 个族（{summary['bytes']/1048576:.1f} MB）"
             if summary.get("removed"):

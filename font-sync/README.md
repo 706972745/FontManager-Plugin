@@ -138,6 +138,12 @@ FontManager → **设置 → 插件** → 本插件那一行右侧**齿轮**（�
 右键插件行 → **预演本次同步（不传）**：只列「多少族、多少 MB」，不打包、不联网上传。
 看完心里有数再点「立即同步（全部）」。
 
+结果会写成 **「全库 N 族 → 本次会传 M 族（跳过 …）」**。M 比 N 小很多时，看括号里的原因：
+
+- `XXXX 族版权未知` —— 默认规则「不同步版权未知的字族」挡掉的。个人字库通常九成以上属于这一类，
+  想把整库备份到自己的私有仓，就到「同步规则」**关掉这一项**再预演一次（0.8.12 起预演结果会明说）。
+- `X 族超大` —— 超过「单族上限（默认 85 MB）」，比如思源宋体整族 160 MB。调大上限即可。
+
 ## 下载回本机（另一台电脑怎么把字体拿回来）
 
 0.8.0 新增两种按需下载：
@@ -300,7 +306,8 @@ fontmanager-library（私有）
 | `同步失败：本地 API 401` | 主程序的插件开关刚开、令牌还没签发；关掉再打开开关 |
 | 传得很慢 | 上行带宽决定，6 GB 首次全量以小时计；之后只有增量 |
 | `上传前请先在设置面板完成 GitHub 账号登录验证` | 直接在插件右键菜单点同步时没有验证票据；打开设置面板点一次「立即同步」，按弹窗在浏览器登录对应账号输验证码 |
-| 验证弹窗要 Client ID | 第一次用需要建一个 GitHub OAuth App（Developer settings → OAuth Apps → New OAuth App），名称随意、回调填 `http://localhost`，把公开的 **Client ID** 粘进弹窗保存即可；插件不需要也不会存 client_secret |
+| 验证弹窗要 Client ID | 第一次用需要建一个 GitHub OAuth App（Developer settings → OAuth Apps → New OAuth App），名称随意、回调填 `http://localhost`，**创建后必须勾上 `Enable Device Flow` 再 Update application**，把公开的 **Client ID** 粘进弹窗保存即可（0.8.12 起弹窗里有「先检测」按钮，会直接告诉你能不能用）；插件不需要也不会存 client_secret |
+| `GitHub 拒绝了这次请求（HTTP 400）` / 旧版显示 `连不上 GitHub 的登录验证服务：HTTP Error 400` | 99% 是 OAuth App 没勾 `Enable Device Flow`（网络没坏，是 GitHub 明确拒绝）。0.8.12 起弹窗会直接指到这个开关；不想建 OAuth App 也可以点弹窗里的「改用令牌校验」，用本机已保存的令牌向 GitHub 确认身份 |
 | `登录的是 xxx，当前令牌属于 yyy` | 浏览器里登录的 GitHub 账号和令牌所属账号不一致，退出后用对应账号重新登录再试 |
 | **同步显示「完成」，但 GitHub 的 release 里没有包** | 0.6.0 及以前的 bug：上传没带 `Content-Type`，GitHub 回 422，而代码把任何 422 都当「同名已存在」按成功处理。0.6.1 起上传按 `application/octet-stream` 发，且只有真正的 `already_exists` 才算成功 |
 | 点「预演 / 立即同步」只回一句 `unknown endpoint` | 0.4.0 及以前的前端 bug：这两个按钮没带请求体，被发成 GET，后端只在 POST 处理。升级到 0.4.1 即可 |

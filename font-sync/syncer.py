@@ -130,6 +130,10 @@ def build_plan(api, cfg, state, only_family=None, log=print):
     groups = group_by_family(faces)
     if system_faces:
         log(f"跳过 {system_faces} 个系统字体（Windows 自带，不可再分发、也不属于字体库）")
+    # 用户 2026-11-09 报「4000 多只显示出 278 个族」：库里有 4055 个族，其中
+    # 3786 个版权未知、被默认设置挡掉，旧的日志只说「按版权设置跳过 3786 个族」，
+    # 用户看到预演结果 263 就以为插件只认了 278 个族。全库分母必须写在最前面。
+    log(f"全库 {len(groups)} 个族（{len(faces)} 个字面）")
     if only_family:
         groups = {k: v for k, v in groups.items() if k == only_family}
         if not groups:
@@ -166,6 +170,9 @@ def build_plan(api, cfg, state, only_family=None, log=print):
     # 上次同步过、这次本地已经没有的族（只在整个库全量扫的时候算；
     # 单族同步不知道「别的族还在不在」，绝不能拿它推断删除）
     skipped["localFamilies"] = len(groups)
+    skipped["systemFaces"] = system_faces
+    skipped["totalFaces"] = len(faces)
+    skipped["excluded"] = sorted(excluded)
     skipped["gone"] = (sorted(f for f in known if f not in groups)
                        if only_family is None else [])
 
@@ -173,11 +180,32 @@ def build_plan(api, cfg, state, only_family=None, log=print):
     log(f"计划：{len(todo)} 个族要打包（共 {sum(e['bytes'] for e in todo)/1048576:.1f} MB），"
         f"跳过 {skipped['unchanged']} 个未变化")
     if skipped["license"]:
-        log(f"按版权设置跳过 {len(skipped['license'])} 个族（{'/'.join(sorted(excluded))}）")
+        log(f"按版权设置跳过 {len(skipped['license'])} 个族（{'/'.join(sorted(excluded))}）"
+            f"—— 想让这些也备份，就到「同步规则」里关掉「不同步版权未知的字族」")
     if skipped["tooBig"]:
+        log(f"超过单族上限（{max_bytes/1048576:.0f} MB）跳过 {len(skipped['tooBig'])} 个族，"
+            f"可在「同步规则 → 单族上限」调大")
         for family, size in skipped["tooBig"][:20]:
             log(f"  过大跳过：{family}（{size/1048576:.1f} MB）")
     return todo, skipped
+
+
+def describe_skips(skipped):
+    """一句话说清「为什么只传这么点」——直接进 toast / 面板消息区。
+
+    预演结果必须带上分母（全库多少族、各项跳过多少），否则用户只看到一个
+    263 就以为插件漏读了 3800 个族。
+    """
+    parts = []
+    if skipped.get("license"):
+        parts.append(f"{len(skipped['license'])} 族版权未知")
+    if skipped.get("tooBig"):
+        parts.append(f"{len(skipped['tooBig'])} 族超大")
+    if skipped.get("unchanged"):
+        parts.append(f"{skipped['unchanged']} 族未变化")
+    if not parts:
+        return ""
+    return "，跳过 " + "、".join(parts)
 
 
 def resolve_target(gh, cfg):
@@ -434,8 +462,12 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
             log("预演：以下族在本地已删除，正式同步时远端备份也会删掉 —— "
                 + "、".join(gone[:10]) + ("" if len(gone) <= 10 else f" 等 {len(gone)} 个"))
         log("预演结束：以上是本次会打包上传的内容，什么都没传")
+        preview = (f"预演完成：全库 {skipped.get('localFamilies') or 0} 族，"
+                   f"本次会传 {len(todo)} 族" + describe_skips(skipped))
+        summary["preview"] = preview
+        log(preview)
         _report(progress, "done", total=len(todo), done=0, bytesTotal=total_bytes,
-                message=f"预演完成：{len(todo)} 个族待传")
+                message=preview)
         return summary
 
     _report(progress, "connect", total=len(todo), bytesTotal=total_bytes)

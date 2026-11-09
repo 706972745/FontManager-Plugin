@@ -143,6 +143,9 @@ def snapshot():
         # 只回「存在哪」，绝不回令牌本身；页面用它说明令牌不在插件目录
         "vaultBackend": store.vault_backend(),
         "verify": verify.status(),
+        # Client ID 是公开值（Device Flow 不需要 secret），回给页面只为让「改 Client ID」
+        # 时输入框能带出当前值，不用用户去翻 GitHub。
+        "clientId": cfg.get("githubClientId") or "",
         "accounts": [{"login": n, "current": cur} for n, cur in store.accounts()],
         "owner": cfg.get("owner") or "",
         "repoName": cfg.get("repoName") or "",
@@ -531,6 +534,14 @@ class _Handler(BaseHTTPRequestHandler):
                                    "error": "Client ID 格式不对（只应含字母、数字、. _ -）"})
             verify.set_client_id(cid)
             return self._json({"ok": True, "state": snapshot()})
+
+        if path == "/api/verify/probe":
+            # 自检 Client ID：真打一次 GitHub，直接说「能用 / 没开 Device Flow / 不存在」
+            return self._json(verify.probe(str(data.get("clientId") or "").strip() or None))
+
+        if path == "/api/verify/token":
+            # 降级路径：没有 OAuth App 时，用保险箱里的令牌做 GitHub 身份校验
+            return self._json(verify.verify_by_token())
 
         if path == "/api/verify/start":
             return self._json(verify.start())
