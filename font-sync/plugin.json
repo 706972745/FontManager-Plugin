@@ -1,7 +1,7 @@
 {
   "id": "com.fontmanager.font-sync",
   "name": "字体库同步（GitHub）",
-  "version": "0.8.14",
+  "version": "0.8.15",
   "apiLevel": 1,
   "entry": "main.py",
   "interpreter": "python",
@@ -26,7 +26,7 @@
   ],
   "menus": [
     {
-      "title": "同步这个字族到 GitHub",
+      "title": "重新同步这个字族（强制重传）",
       "on": "family"
     },
     {

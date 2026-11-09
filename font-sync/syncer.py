@@ -119,7 +119,16 @@ def fingerprint(items):
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:32]
 
 
-def build_plan(api, cfg, state, only_family=None, log=print):
+def build_plan(api, cfg, state, only_family=None, log=print, force=False):
+    """算出本轮要传哪些族。
+
+    `force=True` 关掉**指纹闸**（闸 1，只看 路径|大小|mtime），
+    每一次都进打包、由内容哈希（闸 2）决定传不传。
+    为什么需要它：单族同步是用户明确点了那个族，可文件被换成「字节数一样、
+    mtime 又停在同一个秒」的另一版字体时，指纹一模一样 —— 用户点了同步、
+    日志说「未变化」、远端永远是旧的，且**没有任何入口能解套**。
+    代价只是白打一次包（闸 2 仍会挡住真正没变的内容）。
+    """
     sync_cfg = cfg.get("sync") or {}
     excluded = {c.lower() for c in (sync_cfg.get("excludeCopyright") or [])}
     max_bytes = int(sync_cfg.get("maxFamilyBytes") or 400 * 1024 * 1024)
@@ -149,7 +158,8 @@ def build_plan(api, cfg, state, only_family=None, log=print):
             continue
         fp = fingerprint(items)
         prev = known.get(family) or {}
-        if prev.get("fingerprint") == fp and prev.get("hash"):
+        # force 时不吃指纹闸：内容到底变没变，交给打包后的内容哈希判定
+        if not force and prev.get("fingerprint") == fp and prev.get("hash"):
             skipped["unchanged"] += 1
             continue
         total = 0
@@ -448,7 +458,10 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
     batch = max(1, int(sync_cfg.get("batchFamilies") or 100))
 
     _report(progress, "scan")
-    todo, skipped = build_plan(api, cfg, state, only_family, log)
+    # 单族同步 = 用户点名要这一族（右键菜单），走强制通道：不吃指纹闸，
+    # 否则「字节数没变 + mtime 没变」的换字体永远传不上去。
+    todo, skipped = build_plan(api, cfg, state, only_family, log,
+                              force=bool(only_family))
     if max_families and len(todo) > max_families:
         rest = len(todo) - max_families
         todo = todo[:max_families]

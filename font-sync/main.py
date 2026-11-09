@@ -52,7 +52,10 @@ API_BASE = ""
 API_TOKEN = ""
 SYNC_LOCK = threading.Lock()
 
-MENU_FAMILY = "同步这个字族到 GitHub"
+MENU_FAMILY = "重新同步这个字族（强制重传）"
+# 老标题：主程序若缓存了上一版菜单（插件刚更新、窗口没重开），点下来还是这句。
+# 认它，别让用户点了没反应。
+MENU_FAMILY_OLD = "同步这个字族到 GitHub"
 MENU_RESTORE_FAMILY = "从 GitHub 下载这个字族"
 MENU_ALL = "立即同步（全部）"
 MENU_DRYRUN = "预演本次同步（不传）"
@@ -530,7 +533,7 @@ def handle_invoke(hook, payload):
     if menu.startswith(MENU_ALL):
         start_task_with_progress(do_sync, scope="同步 全部字族")
         return
-    if menu.startswith(MENU_FAMILY):
+    if menu.startswith(MENU_FAMILY) or menu.startswith(MENU_FAMILY_OLD):
         if not family:
             log("这个菜单需要在某个字族上右键")
             return
