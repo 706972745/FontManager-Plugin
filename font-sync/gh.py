@@ -10,6 +10,7 @@
 - **代理**：不写死任何代理，走 urllib 默认（读 HTTPS_PROXY / HTTP_PROXY 环境变量）。
 """
 
+import http.client
 import json
 import os
 import time
@@ -120,6 +121,15 @@ class Gh:
                     time.sleep(2 ** attempt)
                     continue
                 raise GhError(0, f"连不上 GitHub：{e.reason}") from None
+            except (OSError, http.client.HTTPException) as e:
+                # 传大包时最常见的「断在半路」：ConnectionResetError /
+                # RemoteDisconnected / IncompleteRead —— 都不是 URLError，
+                # 旧代码会直接穿透成「同步失败」，一个 160 MB 的包白传。
+                # 这里当成网络抖动重试（上传是可重放的 POST，重传整包即可）。
+                if attempt <= 3:
+                    time.sleep(min(30, 2 ** attempt))
+                    continue
+                raise GhError(0, f"上传/请求中断：{e}") from None
 
     # ── 账号与仓库 ──────────────────────────────────────────────────────
     def whoami(self):
@@ -317,6 +327,30 @@ class Gh:
         except GhError as e:
             if e.status != 404:
                 raise
+
+    def purge_empty_assets(self, owner, name, release_id, asset_name=""):
+        """清掉上传失败留下的空壳 asset（`state == "starter"`）。
+
+        官方文档写明：上游失败会回 502，**可能留下一个 state=starter 的空 asset**，
+        可以安全删除。不清理的话，下一次同名上传会撞 422，`already_exists` 分支
+        会把那个空包当「已传过」——远端就永远是个 0 字节的坏包。
+        """
+        removed = 0
+        try:
+            assets = self.list_assets(owner, name, release_id)
+        except Exception:
+            return 0
+        for a in assets:
+            if str(a.get("state") or "") != "starter":
+                continue
+            if asset_name and a.get("name") != asset_name:
+                continue
+            try:
+                self.delete_asset(owner, name, a.get("id"))
+                removed += 1
+            except Exception:
+                pass
+        return removed
 
     def download_asset(self, owner, name, asset_id, dest_path, chunk=1 << 20):
         """下载 asset：先拿 302，再**不带令牌**跟随。

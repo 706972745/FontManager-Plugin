@@ -179,6 +179,10 @@ def build_plan(api, cfg, state, only_family=None, log=print):
     todo.sort(key=lambda e: e["bytes"])
     log(f"计划：{len(todo)} 个族要打包（共 {sum(e['bytes'] for e in todo)/1048576:.1f} MB），"
         f"跳过 {skipped['unchanged']} 个未变化")
+    if todo:
+        # 这里的 MB 是**打包前的原始字节**；0.8.14 起字体用 DEFLATE 压，
+        # 实测中文大族省 18%、小族省 40%，实际上传量明显小于这个数。
+        log("上面的 MB 是原始体积；打包会压缩（实测可省三到四成），实际上传更小")
     if skipped["license"]:
         log(f"按版权设置跳过 {len(skipped['license'])} 个族（{'/'.join(sorted(excluded))}）"
             f"—— 想让这些也备份，就到「同步规则」里关掉「不同步版权未知的字族」")
@@ -401,6 +405,35 @@ def _iter_ledgers(state):
                 yield led
 
 
+def _upload_blob(gh, owner, name, release_id, asset, blob, log=print, attempts=2):
+    """传一个包，失败就整包重传（GitHub 不支持断点续传，只能这样）。
+
+    为什么要在这层再重试：`gh.request()` 内部的重试覆盖 5xx / 网络错误，
+    但一次 160 MB 的上传可能在中途被掐断（换网、休眠、代理抖），
+    此时已经白传几分钟 —— 这里再兜一次，用户不必等到下一轮同步。
+    最终仍失败时，把 502 留下的 `state=starter` 空壳清掉（否则下一轮撞 422
+    会被当成「已传过」，远端留下一个 0 字节的坏包）。
+    """
+    last = None
+    for i in range(1, attempts + 1):
+        try:
+            return gh.upload_asset(owner, name, release_id, asset, blob)
+        except Exception as e:
+            last = e
+            if i >= attempts:
+                break
+            wait = min(30, 5 * i)
+            log(f"    上传失败（第 {i}/{attempts} 次）：{e}；{wait}s 后整包重传")
+            time.sleep(wait)
+    try:
+        purged = gh.purge_empty_assets(owner, name, release_id, asset)
+        if purged:
+            log(f"    已清掉 {purged} 个上传失败留下的空壳 asset")
+    except Exception:
+        pass
+    raise last
+
+
 def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
              progress=None, max_families=None):
     """跑一次同步。返回汇总字典。
@@ -494,7 +527,7 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
                 asset = packer.asset_name(family, meta)
                 with open(os.path.join(tmpdir, "f.zip"), "rb") as fh:
                     blob = fh.read()
-                asset_obj = gh.upload_asset(owner, name, release_id, asset, blob)
+                asset_obj = _upload_blob(gh, owner, name, release_id, asset, blob, log)
                 asset_id = (asset_obj or {}).get("id")
                 if asset_id is None:
                     # 422：同名 asset 已存在（上次传了但没记上账）。必须把它的 id
@@ -804,9 +837,11 @@ def run_restore(gh, api, cfg, state, dry_run=False, overwrite=False, only=None,
             tmp_zip = os.path.join(tmpdir, f"{index:05d}.zip")
             try:
                 size = gh.download_asset(owner, name, row["assetId"], tmp_zip)
-                digest = packer.sha256_path(tmp_zip)
+                # 校验：CRC 全查 + 「清单算出的内容哈希」与资产名里的 hash 对齐。
+                # （0.8.14 起资产名装的是内容哈希，不再等于 zip 字节的 sha256）
+                digest = packer.verify_package(tmp_zip)
                 if not digest.startswith(row["hash12"]):
-                    raise RuntimeError(f"下载内容校验失败（sha256={digest[:12]}，"
+                    raise RuntimeError(f"下载内容校验失败（内容哈希={digest[:12]}，"
                                        f"期望 {row['hash12']}）")
                 manifest = packer.read_manifest(tmp_zip) or {}
                 family = (manifest.get("family") or "").strip() or row["slug"]
