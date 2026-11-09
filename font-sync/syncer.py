@@ -200,7 +200,7 @@ def describe_skips(skipped):
     if skipped.get("license"):
         parts.append(f"{len(skipped['license'])} 族版权未知")
     if skipped.get("tooBig"):
-        parts.append(f"{len(skipped['tooBig'])} 族超大")
+        parts.append(f"{len(skipped['tooBig'])} 族超大（可调「单族上限」）")
     if skipped.get("unchanged"):
         parts.append(f"{skipped['unchanged']} 族未变化")
     if not parts:

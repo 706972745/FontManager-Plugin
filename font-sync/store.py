@@ -66,7 +66,9 @@ DEFAULT_CONFIG = {
     "githubClientId": "",
     "sync": {
         # 只同步这些版权分类之外的；空列表 = 全部。
-        "excludeCopyright": ["unknown"],
+        # 用户 2026-11-09 定口径：**默认整库都备份**（自己的私有仓，不是分发）。
+        # 想「判不清授权的不上云」，到设置里勾上「不同步版权未知的字族」即可。
+        "excludeCopyright": [],
         # 单族 zip 上限（字节）
         "maxFamilyBytes": 85 * 1024 * 1024,
         # 旧 asset 延迟删除的天数

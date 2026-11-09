@@ -67,30 +67,50 @@ NOT_NEEDED = [
 
 
 # ── 数据快照（只给页面看，不含令牌原文） ────────────────────────────────
-def _save_sync_rules(data, owner="", name=""):
-    """把界面上的「同步规则」写进 config.json，返回生效的单族上限（MB）。
+def _rules_patch(data):
+    """把「同步规则」四个控件翻成 config.sync 的补丁。
 
-    上限的唯一默认值在 `store.DEFAULT_CONFIG`，这里不再写死数字 ——
-    以前 400 散在三处（store / snapshot / save），改一处忘一处就会出现
-    「输入框显示 400，实际按 85 跑」这种对不上的情况。
+    默认值只认 `store.DEFAULT_CONFIG`：这里再写死一份，就会出现
+    「默认关闭了，但界面一保存又默默打开」这种对不上的情况。
     """
-    default_mb = store.DEFAULT_CONFIG["sync"]["maxFamilyBytes"] // 1048576
+    d_sync = store.DEFAULT_CONFIG["sync"]
+    default_mb = d_sync["maxFamilyBytes"] // 1048576
     try:
         max_mb = max(1, int(float(data.get("maxFamilyMB") or default_mb)))
     except (TypeError, ValueError):
         max_mb = default_mb
     try:
-        days = max(0, int(float(data.get("deleteAfterDays") or 7)))
+        days = max(0, int(float(data.get("deleteAfterDays")
+                              if data.get("deleteAfterDays") is not None
+                              else d_sync["deleteAfterDays"])))
     except (TypeError, ValueError):
-        days = 7
-    exclude = ["unknown"] if data.get("excludeUnknown", True) else []
+        days = int(d_sync["deleteAfterDays"])
+    exclude = (["unknown"] if data.get("excludeUnknown", False)
+               else list(d_sync.get("excludeCopyright") or []))
+    return {"excludeCopyright": exclude,
+            "maxFamilyBytes": max_mb * 1024 * 1024,
+            "deleteAfterDays": days,
+            "deleteRemovedFamilies": bool(data.get("deleteRemoved", True))}
+
+
+def save_rules_only(data):
+    """只写同步规则，不碰账号 / 仓库名（勾选框一改就立刻生效）。
+
+    0.8.13 修：以前规则只在「保存为当前库」里跟着写。用户把勾去掉后直接点
+    「立即同步」，同步结束面板按服务端状态重绘，勾选又回到默认 —— 看起来
+    就是「这两个规则没法取消」。现在 change 即落盘，不依赖别的按钮。
+    """
+    patch = _rules_patch(data)
+    store.save_config({"sync": patch})
+    return patch
+
+
+def _save_sync_rules(data, owner="", name=""):
+    """把「同步规则 + 目标是哪个库」一起写进 config.json，返回生效的单族上限（MB）。"""
     patch = {
         "owner": owner, "repoName": name,
         "account": store.current_account()[0],
-        "sync": {"excludeCopyright": exclude,
-                 "maxFamilyBytes": max_mb * 1024 * 1024,
-                 "deleteAfterDays": days,
-                 "deleteRemovedFamilies": bool(data.get("deleteRemoved", True))},
+        "sync": _rules_patch(data),
     }
     if "restoreDir" in data:
         patch["restoreDir"] = str(data.get("restoreDir") or "").strip()
@@ -99,7 +119,7 @@ def _save_sync_rules(data, owner="", name=""):
     store.save_config(patch)
     if name:
         store.remember_repo(owner or store.current_account()[0], name)
-    return max_mb
+    return patch["sync"]["maxFamilyBytes"] // 1048576
 
 
 def _all_family_names(st):
@@ -660,6 +680,11 @@ class _Handler(BaseHTTPRequestHandler):
             store.remember_repo(owner, name)
             return self._json({"ok": res["ok"], "existed": existed, "message": message,
                                "state": snapshot()})
+
+        if path == "/api/rules":
+            # 同步规则的四个控件：勾/改就立刻落盘，不再需要「保存规则」按钮
+            save_rules_only(data)
+            return self._json({"ok": True, "message": "已保存", "state": snapshot()})
 
         if path == "/api/save":
             name = str(data.get("repoName") or "").strip()

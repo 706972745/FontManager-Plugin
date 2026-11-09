@@ -357,14 +357,13 @@
     </div>
 
     <div class="card">
-      <h2><span class="num">2</span>同步规则（一般不用改）</h2>
+      <h2><span class="num">2</span>同步规则（勾一下立即生效）</h2>
       <div class="row" style="align-items:flex-start">
         <label style="display:flex;gap:8px;align-items:flex-start;flex:1 1 100%">
           <input type="checkbox" id="excludeUnknown" style="margin-top:4px">
-          <span>不同步<b>「版权未知」</b>的字族（默认开启）
-            <span class="sub" style="display:block">判不清授权的字体不上云，是给账号留退路。
-              <b>注意：个人字库通常有九成以上属于「版权未知」</b>，开着它预演只会剩几百个族。
-              想把整个字库都备份到自己的私有仓，就<b>关掉这一项</b>再预演一次。</span></span>
+          <span>不同步<b>「版权未知」</b>的字族（<b>默认关闭</b>：整库都备份）
+            <span class="sub" style="display:block">默认不挡：自己的私有仓是备份，不是分发。勾上它就只传判得清授权的字体，
+              个人字库通常有<b>九成以上属于「版权未知」</b>，勾上后预演只剩几百个族。</span></span>
         </label>
       </div>
       <div class="row" style="align-items:flex-start">
@@ -387,6 +386,7 @@
         <button class="act" id="saveRules" type="button" style="align-self:flex-end">保存规则</button>
       </div>
       <p class="sub">超上限的族会跳过并报出来；旧包到期才物理删除，留出「另一台机器用旧版覆盖新版」的反悔时间。</p>
+      <div id="rulesMsg" class="sub"></div>
     </div>
 
     <div class="card">
@@ -1099,7 +1099,31 @@
     return r.ok;
   }
   $('saveRepo').onclick = saveRepo;
-  $('saveRules').onclick = saveRepo;
+
+  // 同步规则：勾/改就立刻落盘，不依赖任何别的按钮。
+  // 0.8.13 之前只在「保存为当前库」里跟着写：用户把勾去掉后直接点「立即同步」，
+  // 同步结束面板按服务端状态重绘，勾选又回到默认 —— 看起来就是「没法取消」。
+  async function saveRules(showOk) {
+    const r = await api('rules', {
+      excludeUnknown: $('excludeUnknown').checked,
+      deleteRemoved: $('deleteRemoved').checked,
+      maxFamilyMB: $('maxMB').value,
+      deleteAfterDays: $('keepDays').value,
+    });
+    if (r.ok) {
+      if (r.state) STATE = r.state;
+      msg($('rulesMsg'), showOk ? '规则已保存，下一次预演 / 同步就按这个跑。' : '', 'ok');
+      return true;
+    }
+    // 保存失败必须把界面滚回真实状态，否则用户以为改好了、实际按旧规则跑
+    if (r.state) render(r.state);
+    msg($('rulesMsg'), '规则没保存成功：' + esc(r.error || '未知原因'), 'bad');
+    return false;
+  }
+  ['excludeUnknown', 'deleteRemoved', 'maxMB', 'keepDays'].forEach((id) => {
+    $(id).onchange = () => { void saveRules(true); };
+  });
+  $('saveRules').onclick = () => { void saveRules(true); };
 
   // ── 下载回本机 ──────────────────────────────────────────
   let RESTORE = null;

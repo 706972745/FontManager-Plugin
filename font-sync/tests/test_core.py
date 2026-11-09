@@ -183,7 +183,8 @@ class StoreTests(unittest.TestCase):
         cfg = store.load_config()
         self.assertEqual(cfg["repoName"], "x")
         self.assertEqual(cfg["sync"]["deleteAfterDays"], 3)
-        self.assertEqual(cfg["sync"]["excludeCopyright"], ["unknown"],
+        # 0.8.13 起默认不挡「版权未知」（用户口径：私有仓是备份不是分发）
+        self.assertEqual(cfg["sync"]["excludeCopyright"], [],
                          "没写的字段要回落到默认值")
 
     def test_token_is_encrypted_on_disk(self):
