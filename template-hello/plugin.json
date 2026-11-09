@@ -1,10 +1,17 @@
 {
   "id": "com.example.hello-plugin",
   "name": "你好，插件（模板）",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "apiLevel": 1,
   "entry": "main.py",
   "interpreter": "python",
+  "requirements": {
+    "runtime": "Python 3.10+",
+    "libraries": [],
+    "system": [],
+    "platforms": ["Windows", "Linux", "macOS"],
+    "note": "纯标准库、不自带解释器：需要软件「设置 → 插件 → 运行时管理」里的 Python，或系统已装 Python 3.10+。没装的话插件开关会提示「缺少运行时」。"
+  },
   "summary": "最小可用插件模板：右键看一个字族有多少字面，改这个就能做出你自己的插件",
   "description": "什么都不用装：FontManager 1.4.4+ 安装包内置 Python 运行时，标准库插件直接能跑。把本目录当起点，改 plugin.json 的 id/name/menus 和 main.py 的逻辑，就是一个新插件",
   "permissions": [

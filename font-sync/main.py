@@ -8,10 +8,13 @@
 改一个 60 KB 的英文字体，不该重传 520 MB。所以每个字族一个 zip，
 内容没变就整族跳过；变了才重新打包，打包后哈希一样还不上传。
 
-安全边界（三条硬闸，任一不满足就中止）：
+安全边界（四条硬闸，任一不满足就中止）：
 1. 仓库必须**私有**且在 GitHub 上真私有（`private` 字段 + 匿名探一次）；
-2. 令牌用 Windows DPAPI 加密落盘，只有当前 Windows 用户能解；
-3. 判不清授权的族（`copyrightClass = unknown`）**默认不同步**，用户可在设置里放开。
+2. 令牌存 **Windows 凭据管理器**（回退时存 %APPDATA% 下 DPAPI 加盐密文），
+   **插件目录里没有任何令牌文件**，插件 ZIP 被拷走也带不走令牌；
+3. 上传与复制令牌前，必须在浏览器登录「令牌所属」的 GitHub 账号完成验证
+   （Device Flow，临时 access_token 用完即弃）；把字体下载回本机不需要验证；
+4. 判不清授权的族（`copyrightClass = unknown`）**默认不同步**，用户可在设置里放开。
 
 通信协议与其它插件一致：stdin 收 JSON 行，stdout 发 JSON 行。
 """
@@ -43,6 +46,7 @@ import gh as ghmod  # noqa: E402
 import panel  # noqa: E402
 import store  # noqa: E402
 import syncer  # noqa: E402
+import verify  # noqa: E402
 
 API_BASE = ""
 API_TOKEN = ""
@@ -238,6 +242,13 @@ def progress_snapshot():
 # ── 同步任务 ────────────────────────────────────────────────────────────
 def do_sync(only_family=None, dry_run=False):
     if not require_configured():
+        return
+    # 上传是敏感操作：面板会先带用户完成 GitHub 登录验证（票据留在本进程内存），
+    # 插件菜单直接触发的同步若没有票据就拒绝。预演不上传、下载 do_restore
+    # 按用户要求一律不检查。验证与面板服务在同一进程，票据可共享。
+    if not dry_run and not verify.valid(store.current_account()[0]):
+        toast("上传前请先在设置面板完成 GitHub 账号登录验证（打开设置 → 同步）")
+        log("同步被拒绝：没有有效的 GitHub 登录验证")
         return
     if not SYNC_LOCK.acquire(blocking=False):
         toast("已经在同步了，等这一轮结束")

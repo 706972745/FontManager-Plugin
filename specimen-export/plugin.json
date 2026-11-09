@@ -1,10 +1,17 @@
 {
   "id": "com.fontmanager.example.specimen-export",
   "name": "示例文本导出",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "apiLevel": 1,
   "entry": "main.py",
   "interpreter": "python",
+  "requirements": {
+    "runtime": "Python 3.13（插件自带）",
+    "libraries": ["Pillow 13"],
+    "system": ["Windows PowerShell", ".NET Framework (WinForms)", "系统文件夹选择框"],
+    "platforms": ["Windows"],
+    "note": "ZIP 内含 runtime/python.exe 与 Pillow，机器上不用装 Python；自带的 embeddable Python 不含 tkinter，设置面板改走 PowerShell + WinForms，装了完整 Python 才用 tkinter。"
+  },
   "description": "右键字族 → 把示例文本导出成 PNG（保存位置可自己设）；启动时自动跑一遍 API / 权限自检。自带 Python 运行时（runtime/），机器上不用装任何东西",
   "permissions": [
     "read:fonts",

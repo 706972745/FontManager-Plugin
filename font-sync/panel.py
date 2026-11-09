@@ -8,7 +8,9 @@
 安全边界：
 - 只绑 127.0.0.1（不监听对外网卡）；
 - 每次打开生成一次性随机 key，页面和所有 API 都要带上；
-- 页面永远不会拿到令牌原文（只回打码后的），令牌只在 Python 进程里流转；
+- 状态快照永远只有打码后的令牌；只有用户主动点「复制令牌」且**先在浏览器
+  登录对应 GitHub 账号验证通过**，这一个接口才会返回令牌原文；
+- 令牌存在 Windows 凭据管理器（或 %APPDATA% 的 DPAPI 密文），插件目录里没有令牌文件；
 - 没有 CORS 头，别的站点读不到响应；
 - 45 分钟无请求自动关停。
 """
@@ -29,6 +31,7 @@ import gh as ghmod
 import packer
 import store
 import syncer
+import verify
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PANEL_HTML = os.path.join(HERE, "panel.html")
@@ -137,6 +140,9 @@ def snapshot():
         "login": login,
         "tokenMask": store.mask(token) if token else "",
         "vaultPersisted": store.vault_persisted(),
+        # 只回「存在哪」，绝不回令牌本身；页面用它说明令牌不在插件目录
+        "vaultBackend": store.vault_backend(),
+        "verify": verify.status(),
         "accounts": [{"login": n, "current": cur} for n, cur in store.accounts()],
         "owner": cfg.get("owner") or "",
         "repoName": cfg.get("repoName") or "",
@@ -493,6 +499,7 @@ class _Handler(BaseHTTPRequestHandler):
             me = client.whoami()
             login = me.get("login") or ""
             saved = store.upsert_account(login, token, make_current=True)
+            verify.invalidate()  # 换了令牌/账号，旧的登录验证立刻作废
             cfg = store.load_config()
             owner, name = _ensure_target(login, cfg.get("owner"), cfg.get("repoName"))
             caps = capabilities(login, owner, name)
@@ -510,12 +517,39 @@ class _Handler(BaseHTTPRequestHandler):
             login = str(data.get("login") or "")
             ok = store.set_current(login)
             store.save_config({"account": login})
+            verify.invalidate()  # 切账号后必须重新用对应账号登录验证
             return self._json({"ok": bool(ok), "state": snapshot()})
 
+        # ── GitHub 登录验证（上传 / 复制令牌前必须过这一关）──────────────
+        if path == "/api/verify/status":
+            return self._json(verify.status())
+
+        if path == "/api/verify/clientid":
+            cid = str(data.get("clientId") or "").strip()
+            if cid and not re.fullmatch(r"[A-Za-z0-9_.\-]{4,80}", cid):
+                return self._json({"ok": False,
+                                   "error": "Client ID 格式不对（只应含字母、数字、. _ -）"})
+            verify.set_client_id(cid)
+            return self._json({"ok": True, "state": snapshot()})
+
+        if path == "/api/verify/start":
+            return self._json(verify.start())
+
+        if path == "/api/verify/poll":
+            return self._json(verify.poll())
+
+        if path == "/api/verify/cancel":
+            verify.invalidate()
+            return self._json({"ok": True, "state": snapshot()})
+
         if path == "/api/account/copy":
-            # 用户要求：账号行一键复制完整令牌。面板服务只监听 127.0.0.1、
-            # 且要一次性 key 才能进到这里；令牌本身也是本机 DPAPI 存的。
-            login = str(data.get("login") or "").strip()
+            # 只有确认本人已在浏览器登录「令牌所属」的 GitHub 账号，
+            # 才允许把令牌原文交给页面。令牌本身存在 Windows 凭据管理器里，
+            # 不在插件目录，也不在面板快照里。
+            login = str(data.get("login") or "").strip() or store.current_account()[0]
+            if not verify.valid(login):
+                return self._json({"ok": False, "needVerify": True,
+                                   "error": "请先在浏览器登录对应的 GitHub 账号完成验证"})
             tok = store.token_for(login or None)
             if not tok:
                 return self._json({"ok": False, "error": f"没有 {login or '当前账号'} 的令牌"})
@@ -524,6 +558,7 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/account/remove":
             login = str(data.get("login") or "")
             store.remove_account(login)
+            verify.invalidate()
             left = store.current_account()[0]
             store.save_config({"account": left})
             return self._json({"ok": True, "state": snapshot()})
@@ -633,6 +668,12 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "message": "预演已开始，进度看 FontManager 的通知"})
 
         if path == "/api/sync":
+            # 上传是敏感操作：必须先确认操作者登录了令牌所属的 GitHub 账号。
+            # 下载（/api/restore、restoreDry）按用户要求完全不验证。
+            login = store.current_account()[0]
+            if not verify.valid(login):
+                return self._json({"ok": False, "needVerify": True,
+                                   "error": "上传前请先在浏览器登录对应的 GitHub 账号完成验证"})
             fn = self.panel.actions.get("sync")
             if not fn:
                 return self._json({"ok": False, "error": "这个动作需要从插件菜单触发"})

@@ -6,7 +6,7 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgray)](https://github.com/706972745/FontManager)
 [![FontManager](https://img.shields.io/badge/for-FontManager%201.3%2B-5b21b6)](https://github.com/706972745/FontManager)
 
-**FontManager 的官方插件集 —— 每个插件独立目录、自带运行环境，下载即用。**
+**FontManager 的官方插件集 —— 每个插件独立目录，运行环境在下表标清楚，下载前先看一眼。**
 
 主程序：[706972745/FontManager](https://github.com/706972745/FontManager) ·
 插件开发规范：[docs/PLUGINS.md](https://github.com/706972745/FontManager/blob/main/docs/PLUGINS.md)
@@ -17,10 +17,12 @@
 
 ## ✍️ 自己写一个插件（5 分钟）
 
-**解释器不用自己装**：FontManager 安装包不内置解释器（1.4.11 起），写插件前到
+**先确认解释器**：FontManager 安装包不内置解释器（1.4.11 起），写插件前到
 **设置 → 插件 → 运行时管理** 一键下载 **Python 3.13**（含 Pillow、fontTools，约 19 MB）或
 **Node.js 22 LTS**（约 32 MB），也可以用系统里已有的 Python/Node —— 装没装、缺什么、
 占多少空间，界面上一眼可见，随时可删、可一键补回。
+**软件「设置 → 插件」里每一行都会标出该插件需要什么解释器、是否自带、还缺什么**，
+缺环境时徽标变红 —— 那不是插件坏了，也不是软件版本不对。
 
 1. 把 [`template-hello/`](template-hello/) 复制一份当起点（一百来行，每行都有注释；
    也可以直接下 [template-hello.zip](https://github.com/706972745/FontManager-Plugin/releases/latest/download/template-hello.zip)）；
@@ -42,27 +44,37 @@
 
 | 插件 | 版本 | 说明 | 下载 |
 |---|---|---|---|
-| [示例文本导出](specimen-export/) | 1.2.1 | 右键字族 → 把示例文本渲染成 PNG（1280px 样张）；保存位置可自设；启动时自动跑 API / 权限自检 | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/specimen-export.zip) |
+| [示例文本导出](specimen-export/) | 1.2.2 | 右键字族 → 把示例文本渲染成 PNG（1280px 样张）；保存位置可自设；启动时自动跑 API / 权限自检 | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/specimen-export.zip) |
 
 ### 📊 数据统计
 
 | 插件 | 版本 | 说明 | 下载 |
 |---|---|---|---|
-| [字体使用统计](font-stats/) | 1.1.1 | 右键字族 → 统计它的字面数与版权分类，结果写进该字族的备注 | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/font-stats.zip) |
+| [字体使用统计](font-stats/) | 1.1.2 | 右键字族 → 统计它的字面数与版权分类，结果写进该字族的备注 | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/font-stats.zip) |
 
 ### ☁️ 备份 / 多机同步
 
 | 插件 | 版本 | 说明 | 下载 |
 |---|---|---|---|
-| [字体库同步（GitHub）](font-sync/) | 0.8.10 | 把字体库**按字族**打包，增量同步到**你自己**的私有 GitHub 仓库（多账号、多库切换，没配好不工作）；只传变化的族；三条安全硬闸（私有性匿名探测 / 授权未知默认不传 / 令牌 DPAPI 加密）。**设置面板开在应用内窗口**（≥1.4.3；老版退回 Edge 独立窗口），含权限说明与从零教程；本地删掉字族会同步删除远端备份（可关，清单不完整时有保险丝拦删）；选库页可下拉选择已有私有库或一键新建（带防呆）；同步有实时进度条（面板 + **主页面底部进度条**，需主程序 1.4.8+）。**按需下载**：右键单族「从 GitHub 下载」、面板「补缺」页导入快照分析缺失后勾选补齐；空机一键全量恢复（逐文件 sha256 校验）。0.8.10：release 产物改用**带版本号的文件名**（`font-sync-0.8.10.zip`），卡片介绍改一句话短摘要（完整介绍悬停显示，需主程序 1.4.9+）。零第三方依赖 | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/font-sync-0.8.10.zip) |
+| [字体库同步（GitHub）](font-sync/) | 0.8.11 | 把字体库**按字族**打包，增量同步到**你自己**的私有 GitHub 仓库（多账号、多库切换，没配好不工作）；只传变化的族；四条安全硬闸（私有性匿名探测 / 授权未知默认不传 / 令牌存 Windows 凭据管理器不在插件里 / 上传需 GitHub 登录验证）。**设置面板开在应用内窗口**（≥1.4.3；老版退回 Edge 独立窗口），含权限说明与从零教程；本地删掉字族会同步删除远端备份（可关，清单不完整时有保险丝拦删）；选库页可下拉选择已有私有库或一键新建（带防呆）；同步有实时进度条（面板 + **主页面底部进度条**，需主程序 1.4.8+）。**按需下载**：右键单族「从 GitHub 下载」、面板「补缺」页导入快照分析缺失后勾选补齐；空机一键全量恢复（逐文件 sha256 校验）。0.8.11：令牌迁出插件目录改存 Windows 凭据管理器，上传 / 复制令牌需浏览器登录对应 GitHub 账号验证（下载不需要），`plugin.json` 补运行环境自述。零第三方依赖 | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/font-sync-0.8.11.zip) |
 
-> 前两个插件**自带 Python 运行时**（`runtime/`，Python 3.13 + Pillow + fontTools，各约 56 MB）——
-> 机器上**不用装任何东西**，下载解压即可。`plugin.json` 里的 `interpreterPath` 让主程序直接使用插件自带的环境。
-> `font-sync` 只用标准库，FontManager 1.4.4+ **内置共享运行时**（Python 3.13 + Pillow + fontTools），
-> 什么都不用装；1.4.3 及以前的主程序则需系统有 Python 3.10+（或把上面任一插件的 `runtime/` 复制进插件目录）。
+### 运行环境总览（下载前先看）
+
+| 插件 | 解释器 | 自带？ | 第三方库 | 系统组件 | 平台 |
+|---|---|---|---|---|---|
+| 示例文本导出 | Python 3.13 | ✅ `runtime/` | Pillow 13，已带 | 系统对话框组件 | Windows |
+| 字体使用统计 | Python 3.13 | ✅ `runtime/` | 无（纯标准库） | 无 | Windows |
+| 字体库同步 | Python 3.10+ | ❌ 需软件/系统提供 | 无 | Windows 凭据管理器、DPAPI、浏览器 | Windows |
+| 你好，插件（模板） | Python 3.10+ | ❌ 需软件/系统提供 | 无 | 无 | 跨平台代码 |
+
+> 「需软件/系统提供」= 到 **设置 → 插件 → 运行时管理** 下载一次共享 Python，
+> 或机器上本来就有 Python 3.10+。软件插件清单里会直接标出「需要 Python」/「缺少运行时」。
+> 各插件的 `plugin.json` 都写了 `requirements`，发布页表格与软件界面读的是同一份数据。
+> `font-sync` 的令牌存 **Windows 凭据管理器**，插件目录里没有令牌；上传与复制令牌
+> 还需在浏览器登录对应 GitHub 账号验证，下载字体不需要验证。
 >
-> 📖 每个插件目录里都有自己的**详细教程**（菜单用法、配置项、自检与卸载）：
-> [示例文本导出](specimen-export/) · [字体使用统计](font-stats/) · [字体库同步](font-sync/)
+> 📖 每个插件目录里都有自己的**详细教程**（菜单用法、依赖、自检与卸载）：
+> [示例文本导出](specimen-export/) · [字体使用统计](font-stats/) · [字体库同步](font-sync/) · [模板](template-hello/)
 
 > 每个版本的变更（也是发布页正文的来源）记在 [CHANGELOG.md](CHANGELOG.md)；
 > 发布页的插件表与版本由 CI 从各插件 `plugin.json` 读取，不会和仓库脱节。

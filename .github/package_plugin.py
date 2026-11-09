@@ -32,7 +32,7 @@ OUT = os.path.join(ROOT, "dist")
 # font-sync 走「纯代码」策略：它零第三方依赖，runtime 由主程序注入
 FONT_SYNC = "font-sync"
 FONT_SYNC_CODE = ["plugin.json", "main.py", "panel.py", "panel.html", "gh.py", "packer.py",
-                  "store.py", "syncer.py", "README.md"]
+                  "store.py", "syncer.py", "verify.py", "README.md"]
 
 # 其它插件「整目录」打包：自带 runtime/，用户解压后直接是一个文件夹
 FULL_DIR_PLUGINS = ["font-stats", "specimen-export", "template-hello"]
@@ -131,6 +131,31 @@ def one_liner(plugin):
     return text if len(text) <= 60 else text[:59] + "…"
 
 
+def requirements_cell(plugin):
+    """发布页「运行环境」列：解释器 + 是否自带 + 第三方库 + 系统组件。
+
+    用户下载后跑不起来，多半不是插件坏了或软件版本不对，而是环境没配齐 ——
+    所以这一列必须在下载之前就看得见（软件「设置 → 插件」里也标同一套信息）。
+    """
+    m = manifest(plugin)
+    r = m.get("requirements") or {}
+    bits = []
+    runtime = str(r.get("runtime") or "").strip()
+    if runtime:
+        bits.append(runtime)
+    if m.get("interpreterPath"):
+        bits.append("**自带，免安装**")
+    else:
+        bits.append("需软件运行时管理 / 系统提供")
+    libs = [str(x) for x in (r.get("libraries") or []) if x]
+    if libs:
+        bits.append("需 " + "、".join(libs))
+    system = [str(x) for x in (r.get("system") or []) if x]
+    if system:
+        bits.append("系统组件：" + "、".join(system))
+    return "<br>".join(bits)
+
+
 def changelog_section():
     """CHANGELOG.md 里最新的一段（第一个 `## ` 到下一个 `## ` 之前）。"""
     path = os.path.join(ROOT, "CHANGELOG.md")
@@ -153,8 +178,8 @@ def write_release_notes(downloads):
     """生成发布页正文。downloads：{插件目录: 资产文件名}。"""
     repo = "https://github.com/706972745/FontManager-Plugin"
     rows = [
-        "| 插件 | 版本 | 下载 | 说明 |",
-        "|---|---|---|---|",
+        "| 插件 | 版本 | 运行环境（用不了先查这里） | 下载 | 说明 |",
+        "|---|---|---|---|---|",
     ]
     order = [FONT_SYNC] + FULL_DIR_PLUGINS
     for plugin in order:
@@ -162,19 +187,24 @@ def write_release_notes(downloads):
         asset = downloads[plugin]
         rows.append(
             f"| [{m['name']}]({repo}/tree/main/{plugin}) | {m['version']} "
+            f"| {requirements_cell(plugin)} "
             f"| [`{asset}`]({repo}/releases/download/v1/{asset}) | {one_liner(plugin)} |"
         )
 
     parts = [
-        "## 插件合集 v1（自带运行时）",
+        "## 插件合集 v1",
+        "",
+        "**下载前先看「运行环境」那一列**：软件「设置 → 插件」里每一行也标了同样的信息，",
+        "缺解释器时徽标会变红并提示去「运行时管理」下载 —— 那不是插件坏了，也不是软件版本不对。",
         "",
         "每个插件一个独立目录，下载对应 ZIP 解压后放进 FontManager 的插件目录即可；",
-        "`font-stats` / `specimen-export` 自带 Python 运行时（Python 3.13 + Pillow + fontTools），",
-        "机器上不用装任何东西。安装步骤见 [README](" + repo + "#-安装)。",
+        "安装步骤见 [README](" + repo + "#-安装)。",
         "",
         *rows,
         "",
-        "> `font-sync-full.zip` 是带测试与运行时的调试包，普通使用装 `font-sync-<版本>.zip`。",
+        "> `font-sync-full.zip` 是带测试的调试包（**不含 runtime**），普通使用装 `font-sync-<版本>.zip`。",
+        "> `template-hello.zip` 是给插件作者的最小模板，需要软件或系统提供 Python。",
+        "> 令牌不会存在插件里：`font-sync` 把它交给 Windows 凭据管理器保管，上传与复制令牌还需在浏览器登录对应 GitHub 账号验证。",
         "",
     ]
     section = changelog_section()

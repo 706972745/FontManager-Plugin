@@ -187,14 +187,32 @@ class StoreTests(unittest.TestCase):
                          "没写的字段要回落到默认值")
 
     def test_token_is_encrypted_on_disk(self):
+        """令牌绝不在插件目录：密文只能出现在应用数据目录的 vault.bin。"""
         ok = store.upsert_account("alice", "ghp_example_token_for_test_only_000")
         if not ok:
-            self.skipTest("这台机器没有 DPAPI")
-        with open(store.SECRET_PATH, "rb") as fh:
+            self.skipTest("这台机器没有 DPAPI / 凭据管理器")
+        vault_path = store._paths()[0]
+        with open(vault_path, "rb") as fh:
             raw = fh.read()
-        self.assertTrue(raw.startswith(b"DPAPI1"))
+        self.assertTrue(raw.startswith(b"DPAPI2"), "密文要带版本号 + 加盐加密")
         self.assertNotIn(b"ghp_example", raw, "明文绝不能落盘")
+        self.assertFalse(os.path.exists(store.SECRET_PATH),
+                         "插件目录里绝不能有令牌文件（旧 secret.bin 必须已删除）")
         self.assertEqual(store.token_for("alice"), "ghp_example_token_for_test_only_000")
+
+    def test_plugin_dir_never_contains_a_token(self):
+        """用户口径：插件 ZIP / 插件目录里翻不到任何令牌。"""
+        store.upsert_account("alice", "ghp_top_secret_should_never_be_in_plugin_0001")
+        store._reset_cache()
+        for name in os.listdir(os.path.dirname(store.SECRET_PATH)):
+            path = os.path.join(os.path.dirname(store.SECRET_PATH), name)
+            if not os.path.isfile(path):
+                continue
+            with open(path, "rb") as fh:
+                self.assertNotIn(b"ghp_top_secret", fh.read(),
+                                 f"{name} 里不该出现令牌")
+        self.assertEqual(store.token_for("alice"),
+                         "ghp_top_secret_should_never_be_in_plugin_0001")
 
     def test_multiple_accounts_and_switch(self):
         if not store.upsert_account("alice", "ghp_aaaa"):
@@ -1016,14 +1034,53 @@ class PanelTests(unittest.TestCase):
                 return e.code, json.loads(e.read() or b"{}")
 
         try:
-            for path in ("/api/dryrun", "/api/sync"):
-                code, body = call(path, "POST")
-                self.assertEqual(code, 200, f"{path} POST 应当成功：{body}")
-                self.assertTrue(body["ok"], body)
+            # 这个用例只验证 HTTP 方法路由；上传前的 GitHub 登录验证 mock 成已通过，
+            # 验证本身由下面的 test_sync_requires_github_login 覆盖。
+            from unittest import mock
+            with mock.patch.object(self.panel_mod.verify, "valid", return_value=True):
+                for path in ("/api/dryrun", "/api/sync"):
+                    code, body = call(path, "POST")
+                    self.assertEqual(code, 200, f"{path} POST 应当成功：{body}")
+                    self.assertTrue(body["ok"], body)
             self.assertEqual(fired, ["dry", "sync"], "两个动作都要真的被调用")
             code, body = call("/api/dryrun", "GET")
             self.assertEqual(code, 404, "动作接口不接受 GET")
             self.assertEqual(body["error"], "unknown endpoint")
+        finally:
+            panel.stop()
+
+    def test_sync_requires_github_login_but_restore_does_not(self):
+        """用户口径：上传 / 复制令牌要验证对应账号，下载字体不需要验证。"""
+        import urllib.request
+        from unittest import mock
+
+        fired = []
+        panel = self.panel_mod.Panel({
+            "sync": lambda: fired.append("sync"),
+            "restore": lambda: fired.append("restore"),
+        }).start()
+        base = f"http://127.0.0.1:{panel.port}"
+
+        def post(path, body=None):
+            req = urllib.request.Request(
+                base + path,
+                data=json.dumps(body or {}).encode("utf-8"),
+                headers={"X-Panel-Key": panel.key, "Content-Type": "application/json"},
+                method="POST")
+            with urllib.request.urlopen(req, timeout=8) as r:
+                return json.loads(r.read())
+
+        try:
+            with mock.patch.object(self.panel_mod.verify, "valid", return_value=False):
+                r = post("/api/sync")
+                self.assertFalse(r["ok"])
+                self.assertTrue(r.get("needVerify"), "上传必须先验证 GitHub 账号")
+                r = post("/api/account/copy", {"login": "someone"})
+                self.assertFalse(r["ok"])
+                self.assertTrue(r.get("needVerify"), "复制令牌必须先验证 GitHub 账号")
+                r = post("/api/restore")
+                self.assertTrue(r["ok"], "下载字体不需要验证")
+            self.assertEqual(fired, ["restore"], "没验证时上传绝不能被触发")
         finally:
             panel.stop()
 

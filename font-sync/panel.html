@@ -275,10 +275,17 @@
 
     <div class="card">
       <h2><span class="num">3</span>这台机器上存了什么</h2>
-      <p>令牌用 <b>Windows DPAPI</b> 加密后写在插件目录的 <code>secret.bin</code>，只有<b>当前 Windows 用户</b>能解开；
-        换台电脑或换 Windows 账号都解不开。DPAPI 不可用时插件<b>不落盘</b>，只在本次运行内有效（会明确提示）。</p>
-      <p>插件的配置文件是明文 <code>config.json</code>（只有账号名、仓库名、同步规则，<b>不含令牌</b>），
-        状态文件 <code>state.json</code>（每族上次同步的哈希）。三个文件都可用「高级」页删除重来。</p>
+      <p><b>令牌绝对不在插件目录里。</b>它优先存进 <b>Windows 凭据管理器</b>（控制面板 → 凭据管理器 →
+        Windows 凭据 → <code>FontManager/font-sync/vault</code>），由 Windows 用你当前账户的密钥加密保管；
+        凭据管理器不可用时回退到 <code>%APPDATA%\FontManager\font-sync\vault.bin</code>
+        （DPAPI 加盐密文）。两者都不可用就<b>只留在内存里</b>，绝不写明文。
+        插件 ZIP、插件目录、代码里都<b>没有令牌</b>，拷走插件也带不走。旧版写在插件目录的
+        <code>secret.bin</code> 会在首次读取时自动迁移并删除。</p>
+      <p>插件目录里只有明文 <code>config.json</code>（账号名、仓库名、同步规则、公开的 Client ID，<b>不含令牌</b>）
+        和 <code>state.json</code>（每族上次同步的哈希）。</p>
+      <p><b>上传和复制令牌需要先验证身份：</b>点这两个按钮时，会要求你在浏览器登录「令牌所属」的
+        GitHub 账号并输入一次性验证码（Device Flow，插件碰不到你的密码，也不需要 client_secret）。
+        验证只在本进程内存里保留 5 分钟；<b>把字体下载回本机不需要验证</b>。</p>
     </div>
   </section>
 
@@ -641,6 +648,40 @@
   </footer>
 </div>
 
+<!-- GitHub 登录验证：上传 / 复制令牌前，必须确认是「令牌所属账号」本人 -->
+<div id="verifyMask" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);align-items:center;justify-content:center;padding:20px">
+  <div style="width:100%;max-width:560px;max-height:90vh;overflow:auto;background:var(--card,#fff);border:1px solid #d7d7dd;border-radius:14px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.28);font-size:14px;line-height:1.7">
+    <h2 style="margin:0 0 8px;font-size:18px">先验证 GitHub 账号</h2>
+    <p style="margin:0 0 14px">上传字体或复制令牌前，需要确认你本人已登录 <b id="verifyLogin">对应</b> 的 GitHub 账号。
+      验证通过后的 5 分钟内可以操作；<b>下载字体不需要验证</b>。插件不会看到你的 GitHub 密码。</p>
+
+    <div id="verifyClientBox" style="display:none;margin-bottom:14px">
+      <p style="margin:0 0 8px"><b>第一次使用需要建一个 OAuth App（只需公开的 Client ID，不需要密钥）：</b></p>
+      <ol style="margin:0 0 10px;padding-left:20px">
+        <li>打开 <a href="https://github.com/settings/developers" target="_blank" rel="noreferrer">GitHub → Developer settings → OAuth Apps</a>，点 <b>New OAuth App</b></li>
+        <li>名称随便填；Homepage URL 与 Authorization callback URL 都填 <code>http://localhost</code>（Device Flow 用不到回调，但表单必填）</li>
+        <li>创建后复制 <b>Client ID</b>，粘到下面保存</li>
+      </ol>
+      <div class="row">
+        <input id="verifyClientId" placeholder="例如 Iv1.xxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false">
+        <button class="act" id="verifySaveClient" type="button">保存并继续</button>
+      </div>
+      <div id="verifyClientMsg" class="sub"></div>
+    </div>
+
+    <div id="verifySteps" style="display:none;margin-bottom:14px">
+      <p style="margin:0 0 8px">在浏览器打开 <a id="verifyLink" href="https://github.com/login/device" target="_blank" rel="noreferrer">github.com/login/device</a>，
+        用 <b id="verifyLogin2">对应账号</b> 登录，输入这个一次性验证码：</p>
+      <div id="verifyCode" style="font-size:28px;letter-spacing:6px;font-weight:700;padding:10px 14px;border:1px dashed #888;border-radius:10px;text-align:center;margin-bottom:10px"></div>
+      <div id="verifyStatus" class="sub">等待你在 GitHub 上确认…</div>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="act ghost" id="verifyCancel" type="button">取消</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   const KEY = new URLSearchParams(location.search).get('k') || '';
@@ -759,6 +800,8 @@
         '</div>'
       )).join('');
       list.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => {
+        // 只有确认本人登录了对应 GitHub 账号，后端才会返回令牌原文
+        if (!await ensureVerify()) return;
         const r = await api('account/copy', { login: b.dataset.copy });
         if (!r.ok) { msg($('tokenMsg'), esc(r.error || '读不到令牌'), 'bad'); return; }
         try {
@@ -1345,6 +1388,8 @@
       return;
     }
     if (!confirm('开始正式同步？会把变化的字族上传到 ' + ((STATE.owner || STATE.login) + '/' + STATE.repoName))) return;
+    // 上传前必须验证 GitHub 账号；下载（恢复）按钮不需要
+    if (!await ensureVerify()) return;
     const r = await api('sync', {});
     LAST_RESTORE_TASK = false;
     msg($('runMsg'), r.ok ? '同步已开始 —— 进度在下面实时更新（这个页面别关）。' : esc(r.error || '触发失败'),
@@ -1410,6 +1455,79 @@
     const r = await api('reset', {});
     if (r.state) render(r.state);
     msg($('advMsg'), '已清空，插件回到刚装好的状态。下次同步会重新核对全部字族（内容没变不会重传）。', 'ok');
+  };
+
+  // ── GitHub 登录验证（上传 / 复制令牌前必须过）────────────────────────
+  let VERIFY_RESOLVE = null;
+  let VERIFY_TIMER = null;
+
+  function stopVerifyPolling() {
+    if (VERIFY_TIMER) { clearTimeout(VERIFY_TIMER); VERIFY_TIMER = null; }
+  }
+  function finishVerify(ok) {
+    stopVerifyPolling();
+    $('verifyMask').style.display = 'none';
+    const done = VERIFY_RESOLVE;
+    VERIFY_RESOLVE = null;
+    if (done) done(ok);
+  }
+  async function pollVerify(interval) {
+    if (!VERIFY_RESOLVE) return;
+    let r;
+    try { r = await api('verify/poll', {}); }
+    catch (e) { $('verifyStatus').textContent = '验证请求失败：' + e; return; }
+    if (r.ok) { $('verifyStatus').textContent = '验证通过，正在继续…'; finishVerify(true); return; }
+    if (r.pending) {
+      VERIFY_TIMER = setTimeout(() => void pollVerify(r.interval || interval),
+                                (r.interval || interval) * 1000);
+      return;
+    }
+    $('verifyStatus').textContent = esc(r.error || '验证失败，请取消后重试');
+  }
+  async function beginVerify() {
+    $('verifyClientBox').style.display = 'none';
+    $('verifySteps').style.display = 'none';
+    let r;
+    try { r = await api('verify/start', {}); }
+    catch (e) { $('verifyStatus').textContent = '连不上 GitHub：' + e; return; }
+    if (!r.ok) {
+      if (r.needClientId) { $('verifyClientBox').style.display = 'block'; return; }
+      $('verifySteps').style.display = 'block';
+      $('verifyStatus').textContent = esc(r.error || '无法开始验证');
+      return;
+    }
+    $('verifyCode').textContent = r.userCode || '';
+    $('verifyLink').href = r.verificationUri || 'https://github.com/login/device';
+    $('verifySteps').style.display = 'block';
+    $('verifyStatus').textContent = '等待你在 GitHub 上确认…';
+    try { window.open($('verifyLink').href, '_blank', 'noopener'); } catch (e) {}
+    void pollVerify(r.interval || 5);
+  }
+  function ensureVerify() {
+    return new Promise((resolve) => {
+      void (async () => {
+        let st;
+        try { st = await api('verify/status', {}); } catch (e) { st = null; }
+        if (st && st.verified) { resolve(true); return; }
+        VERIFY_RESOLVE = resolve;
+        const who = (STATE && STATE.login) || '对应';
+        $('verifyLogin').textContent = who;
+        $('verifyLogin2').textContent = who;
+        $('verifyStatus').textContent = '等待你在 GitHub 上确认…';
+        $('verifyMask').style.display = 'flex';
+        await beginVerify();
+      })();
+    });
+  }
+  $('verifyCancel').onclick = () => { void api('verify/cancel', {}); finishVerify(false); };
+  $('verifySaveClient').onclick = async () => {
+    const cid = ($('verifyClientId').value || '').trim();
+    if (!cid) { $('verifyClientMsg').textContent = '先粘贴 Client ID'; return; }
+    const r = await api('verify/clientid', { clientId: cid });
+    if (!r.ok) { $('verifyClientMsg').textContent = esc(r.error || '保存失败'); return; }
+    if (r.state) render(r.state);
+    $('verifyClientMsg').textContent = '已保存，开始验证…';
+    await beginVerify();
   };
 
   refresh();

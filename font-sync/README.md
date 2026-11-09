@@ -43,21 +43,33 @@
 |---|---|---|
 | **仓库必须真私有** | 除了看 `private` 字段，还会**匿名**请求一次仓库接口；200 就中止 | 手滑把仓设成公开，等于把商用字体摆到公网上 |
 | **判不清授权的不传** | `copyrightClass = unknown` 的族默认跳过 | 未知授权的字体不该出现在任何服务器上（可在设置里放开） |
-| **令牌加密落盘** | Windows DPAPI（`CryptProtectData`），只有当前 Windows 用户能解 | 插件目录被拷走也解不开令牌；解不开就只留在内存里，绝不写明文 |
+| **令牌不在插件里** | 存进 **Windows 凭据管理器**（`FontManager/font-sync/vault`），回退时存 `%APPDATA%\FontManager\font-sync\vault.bin`（DPAPI 加盐密文） | 插件 ZIP / 插件目录 / 代码里都翻不到令牌，拷走插件也带不走；旧版插件目录里的 `secret.bin` 会自动迁移并删除 |
+| **上传与看令牌要验证本人** | 先在浏览器登录「令牌所属」的 GitHub 账号并输入一次性验证码（Device Flow） | 别人坐在这台电脑前也传不了、复制不了令牌；**下载字体不需要验证** |
 
-> 这三条只是「降低你自己踩坑的概率」，不是法律意见：字体授权写着「不得再分发」时，
+> 这四条只是「降低你自己踩坑的概率」，不是法律意见：字体授权写着「不得再分发」时，
 > 传到任何第三方服务器都超出授权范围。私有仓被发现概率极低，但不等于合规。
 > 详见 `软件迭代/GitHub同步实现文档.md`。
 
 ## 安装
 
-1. 下载本目录（或 Release 里的 `font-sync.zip`），解压出 `font-sync` 文件夹；
+1. 下载本目录（或 Release 里的 `font-sync-0.8.11.zip`），解压出 `font-sync` 文件夹；
 2. 打开 FontManager → **设置 → 插件 → 打开插件目录**，把文件夹放进去；
 3. **设置 → 插件**里打开开关（没看到就点「重新扫描」）。
 
-插件只依赖 Python 标准库，**不用装任何第三方包**。机器上没有 Python 3.10+ 时，
-把任意一个自带运行时的插件里的 `runtime/` 目录复制过来，并在 `plugin.json` 里加
-`"interpreterPath": "runtime/python.exe"` 即可。
+### 运行环境 / 依赖
+
+| | |
+|---|---|
+| 解释器 | **Python 3.10+**，本插件**不自带** |
+| 从哪来 | 软件「设置 → 插件 → 运行时管理」下载的 Python，或系统已装的 Python 3.10+ |
+| 第三方库 | **无**（零第三方依赖，全是标准库） |
+| 系统组件 | Windows 凭据管理器、`crypt32.dll` / `kernel32.dll`（DPAPI）、浏览器（设置面板） |
+| 适用平台 | **Windows** |
+
+软件插件清单这一行会标出「需要 Python」；机器上没 Python 时徽标变红显示
+「缺少运行时」，去「运行时管理」点「下载补全」即可 —— **不是插件坏了，也不是软件
+版本不对**。不想下载运行时的话，也可以把任一自带运行时插件的 `runtime/`
+复制过来，并在 `plugin.json` 里加 `"interpreterPath": "runtime/python.exe"`。
 
 ## 首次配置（**必须配好才能用**）
 
@@ -81,8 +93,11 @@ FontManager → **设置 → 插件** → 本插件那一行右侧**齿轮**（�
 
 1. 令牌粘进输入框（显示成圆点，可点「显示」核对）；
 2. 点 **测试并保存** —— 面板会用这个令牌真去问一次 GitHub，逐项给出「读账号 / 建仓写权限 / 目标库可用性」的结果；
-3. 令牌用 **Windows DPAPI** 加密后存进插件的 `secret.bin`，**换台电脑解不开**（等于没带走）；
-   DPAPI 不可用时会明确告警「令牌只在本次运行有效」，绝不写明文。
+3. 令牌交给 **Windows 凭据管理器** 保管（`FontManager/font-sync/vault`），
+   **插件目录里没有任何令牌文件**，插件 ZIP 被拷走也带不走；换 Windows 账号同样打不开。
+   凭据管理器不可用时回退到 `%APPDATA%\FontManager\font-sync\vault.bin`（DPAPI 加盐密文），
+   两者都不可用就只在内存里有效并明确告警，绝不写明文。旧版插件目录的 `secret.bin`
+   会在首次读取时自动迁移并删除。
 
 面板里的「权限说明」页是给**第一次用**的人看的：它列出插件会发的每一个请求分别需要哪项权限
 （建私有仓 `POST /user/repos`、上传 release asset、写 Git Data、删旧 asset，全是 `repo`），
@@ -183,8 +198,9 @@ FontManager → **设置 → 插件** → 本插件那一行右侧**齿轮**（�
 python .github/package_plugin.py       # 输出 dist/font-sync.zip 与 dist/font-sync-full.zip
 ```
 
-- `font-sync.zip`：纯代码，**推荐**。FontManager 1.4.4+ 内置共享运行时
-  （Python 3.13 + Pillow + fontTools），装上软件什么都不用配；
+- `font-sync.zip`：纯代码，**推荐**。插件本身零第三方依赖，但**需要 Python**：
+  到软件「设置 → 插件 → 运行时管理」下载一次共享 Python 3.13，或用系统已装的
+  Python 3.10+（1.4.11 起安装包不再内置解释器，别指望开箱就有）；
 - `font-sync-full.zip`：代码 + tests，调试用（不含 runtime —— runtime 由主程序注入，
   没必要重复背上 59 MB）。
 
@@ -269,7 +285,8 @@ fontmanager-library（私有）
 | 换库后第一轮 | 换库会清掉本机的同步记录（那些 asset 属于旧库），所以新库要**重新全量传一遍**，这是有意的 |
 | 一个 release 装 888 个 asset | 超过自动开 `lib-0002` |
 | GitHub 单文件上限 | 2 GiB（产品限制）；插件的单族上限默认 85 MB，可在设置里改 |
-| 只有 Windows | 令牌保险箱用 DPAPI，`state.json` 路径按插件目录走 |
+| 只有 Windows | 令牌保险箱用 Windows 凭据管理器 / DPAPI，设置面板依赖浏览器与系统对话框 |
+| 上传前要登录 GitHub | 上传与「复制令牌」会要求浏览器登录对应账号并输入一次性验证码；下载不需要 |
 | 中文/特殊字符族名 | asset 名保留中文，只清掉 `\/:*?"<>|` 与空白 |
 
 ## 排错
@@ -282,6 +299,9 @@ fontmanager-library（私有）
 | `仓库匿名可读，已中止` | 仓库其实是公开的 —— 这是**故意的**，改成私有再来 |
 | `同步失败：本地 API 401` | 主程序的插件开关刚开、令牌还没签发；关掉再打开开关 |
 | 传得很慢 | 上行带宽决定，6 GB 首次全量以小时计；之后只有增量 |
+| `上传前请先在设置面板完成 GitHub 账号登录验证` | 直接在插件右键菜单点同步时没有验证票据；打开设置面板点一次「立即同步」，按弹窗在浏览器登录对应账号输验证码 |
+| 验证弹窗要 Client ID | 第一次用需要建一个 GitHub OAuth App（Developer settings → OAuth Apps → New OAuth App），名称随意、回调填 `http://localhost`，把公开的 **Client ID** 粘进弹窗保存即可；插件不需要也不会存 client_secret |
+| `登录的是 xxx，当前令牌属于 yyy` | 浏览器里登录的 GitHub 账号和令牌所属账号不一致，退出后用对应账号重新登录再试 |
 | **同步显示「完成」，但 GitHub 的 release 里没有包** | 0.6.0 及以前的 bug：上传没带 `Content-Type`，GitHub 回 422，而代码把任何 422 都当「同名已存在」按成功处理。0.6.1 起上传按 `application/octet-stream` 发，且只有真正的 `already_exists` 才算成功 |
 | 点「预演 / 立即同步」只回一句 `unknown endpoint` | 0.4.0 及以前的前端 bug：这两个按钮没带请求体，被发成 GET，后端只在 POST 处理。升级到 0.4.1 即可 |
 | 想从头再来 | 关掉插件 → 删 `state.json`（不清远端）或连同远端 release 一起删 |

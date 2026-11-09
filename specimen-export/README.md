@@ -1,4 +1,4 @@
-# 示例文本导出（specimen-export）v1.2.1
+# 示例文本导出（specimen-export）v1.2.2
 
 把任何字族的示例文本渲染成一张 **PNG 样张**，方便对比、分享、留档。
 
@@ -6,8 +6,23 @@
 |---|---|
 | 分类 | 🖼️ 图像导出 |
 | 权限 | `read:fonts` · `read:curation` · `write:curation` |
-| 运行环境 | **自带** Python 3.13 + Pillow（`runtime/`，无需安装任何东西） |
+| 运行环境 | **自带** Python 3.13 + Pillow（`runtime/`，无需安装 Python） |
 | 导出位置 | 默认 `%APPDATA%\FontManager\exports\` |
+
+## 运行环境 / 依赖
+
+| | |
+|---|---|
+| 解释器 | Python 3.13，**插件 ZIP 自带**（`runtime/python.exe`） |
+| 机器上要装 Python 吗 | **不用** |
+| 第三方库 | **Pillow 13**（`from PIL import Image / ImageDraw / ImageFont`），已随 `runtime/` 一起打包 |
+| 系统组件 | **Windows PowerShell + .NET Framework（WinForms）** —— 设置面板与文件夹选择框的兜底实现 |
+| 可选 | `tkinter`：系统里装了**完整** Python 时用它画面板；自带的 embeddable Python 不含 tkinter，会自动改用上面的 PowerShell 方案 |
+| 适用平台 | **Windows**（依赖 PowerShell / WinForms，且自带的是 Windows 版 Python） |
+
+> 也就是说：别的都不用装，但**这是个 Windows 专用插件**。软件「设置 → 插件」
+> 这一行会显示「自带 Python 3.13」并在悬停里列出 Pillow 与系统组件；
+> 若 `runtime/` 不完整，徽标会变红提示「缺少运行时」，重新下载 ZIP 即可。
 
 ## 使用
 

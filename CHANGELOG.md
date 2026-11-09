@@ -9,6 +9,39 @@
 自动生成（见 `.github/workflows/plugin-release.yml` 的「同步发布说明」），
 所以改插件版本时请同步在这里补一条，别只改 `plugin.json`。
 
+## 2026-11-09
+
+> 「下载了用不了」多半不是插件或软件版本的问题，是**环境没配齐**。这一版把每个插件
+> 的解释器 / 第三方库 / 系统组件写进 `plugin.json`，发布页和软件插件列表都直接标出来。
+
+### 新增
+
+- **插件自述运行环境**：四个插件的 `plugin.json` 都加了 `requirements`
+  （`runtime` / `libraries` / `system` / `platforms` / `note`）。发布页插件表新增
+  「运行环境」列，FontManager 1.5.4 的「设置 → 插件」每一行也会显示徽标
+  （自带 / 需要 Python / 无需环境 / **缺少运行时**）与完整依赖悬停说明。
+- **各插件补齐「运行环境 / 依赖」章节**：`font-stats` 说明只用标准库、包里的
+  Pillow/fontTools 是冗余；`specimen-export` 说明实际需要 Pillow + PowerShell/WinForms；
+  `font-sync` 说明零第三方库但依赖 Windows 凭据管理器；`template-hello` 新建 README。
+
+### 安全（font-sync 0.8.11）
+
+- **令牌绝不在插件目录**：改存 **Windows 凭据管理器**（`FontManager/font-sync/vault`），
+  回退时存 `%APPDATA%\FontManager\font-sync\vault.bin`（DPAPI 加盐密文），
+  两者都不可用就只留内存。旧版插件目录里的 `secret.bin` 首次读取时自动迁移并删除。
+  插件 ZIP、插件目录、代码、面板快照里都翻不到令牌。
+- **上传 / 复制令牌前必须验证是账号本人**：改用 GitHub OAuth Device Flow ——
+  在浏览器登录「令牌所属」的 GitHub 账号并输入一次性验证码，插件核对登录名一致才放行；
+  临时 `access_token` 只用来读一次 `/user`，随即丢弃，不落盘、不写日志。
+  插件里只有公开的 Client ID，**绝无 client_secret**。验证票据只在本进程内存保留 5 分钟，
+  换账号 / 换令牌立即作废；插件菜单直接触发的上传没有票据会被拒绝。
+- **下载字体回本机不需要验证**（用户口径）：恢复 / 补缺 / 空机全量恢复路径一律不检查。
+- 新增 `verify.py`、`/api/verify/*` 端点与面板验证弹窗；115 项单测全绿。
+
+### 版本
+
+- `font-sync` 0.8.11 · `font-stats` 1.1.2 · `specimen-export` 1.2.2 · `template-hello` 1.0.1。
+
 ## 2026-11-08
 
 > 这一版主要是修「下载到的包和仓库不是一回事」：release 资产曾长期落后于仓库。
