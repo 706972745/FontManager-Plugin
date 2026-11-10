@@ -261,7 +261,9 @@
     --warn: #6b6b66;
     --bad: #e5484d;
     --shadow-ground: none;
-    --r: 2px;
+    /* R8 §1 的小片档是 4（3px / 5px / 7px 那些散档已收口），
+       面板控件与主程序设置页保持一致，不再用 2 */
+    --r: 4px;
   }
   /* ─── 令牌：深色（墨） ─────────────────────────────────────────────── */
   @media (prefers-color-scheme: dark) {
@@ -421,9 +423,11 @@
   .card p.lead { color: var(--ink); }
   .pick h3 { font-size: 12px; font-weight: 600; color: var(--ink); }
 
-  /* ─── 控件：30 高 / 2px 圆角 / 1px 描边（主程序设置里的按钮口径） ───── */
+  /* ─── 控件：32 高 / 2px 圆角 / 1px 描边 ──────────────────────────────
+     R8 §3 的控件高度三档是 24 / 28 / 32，面板里的输入框、下拉、按钮一律走
+     32 档（原来写 30，正是清单点名要收口的那一档）。 */
   input[type=text], input[type=password], input[type=number], select {
-    height: 30px;
+    height: 32px;
     padding: 0 9px;
     border: 1px solid var(--line-strong);
     border-radius: var(--r);
@@ -440,7 +444,7 @@
   label.f { font-size: 11px; color: var(--ink-3); letter-spacing: 0.01em; margin-bottom: 5px; }
 
   button.act, a.btn {
-    height: 30px;
+    height: 32px;
     padding: 0 14px;
     border-radius: var(--r);
     border: 1px solid var(--accent);
