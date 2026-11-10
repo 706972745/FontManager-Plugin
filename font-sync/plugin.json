@@ -1,15 +1,21 @@
 {
   "id": "com.fontmanager.font-sync",
   "name": "字体库同步（GitHub）",
-  "version": "0.8.17",
+  "version": "0.8.18",
   "apiLevel": 1,
   "entry": "main.py",
   "interpreter": "python",
   "requirements": {
     "runtime": "Python 3.10+",
     "libraries": [],
-    "system": ["Windows 凭据管理器", "crypt32.dll / kernel32.dll (DPAPI)", "浏览器"],
-    "platforms": ["Windows"],
+    "system": [
+      "Windows 凭据管理器",
+      "crypt32.dll / kernel32.dll (DPAPI)",
+      "浏览器"
+    ],
+    "platforms": [
+      "Windows"
+    ],
     "note": "不自带解释器：需要软件「设置 → 插件 → 运行时管理」里的 Python，或系统 Python 3.10+。零第三方库。令牌存 Windows 凭据管理器，不在插件目录；上传与复制令牌需先在浏览器登录对应 GitHub 账号，下载不需要验证。"
   },
   "summary": "把字体库增量备份到你自己的私有 GitHub 仓库，也能一键下载回本机；只传变化的字族，零第三方依赖",
@@ -22,7 +28,8 @@
   "hooks": [
     "init",
     "context-menu",
-    "settings"
+    "settings",
+    "snapshot-missing"
   ],
   "menus": [
     {

@@ -502,6 +502,21 @@ def handle_invoke(hook, payload):
     if hook == "settings":
         open_settings_panel("account")
         return
+    if hook == "snapshot-missing":
+        # 主程序导入快照后发现「本机没有」的字体，把缺失字族广播过来（1.8.3 / 0.8.18）。
+        # 这里**只开面板指路，不自动下载**：补哪些族、从哪个库补，得用户在面板里看一眼再点。
+        # 静默拉几百个族既慢又可能拷来用户不想要的东西。
+        fams = [f for f in (payload.get("families") or []) if isinstance(f, str) and f]
+        missing = payload.get("missing")
+        if not isinstance(missing, int) or missing <= 0:
+            missing = len(fams)
+        open_settings_panel("sync")
+        if fams:
+            toast(f"快照缺 {missing} 个字体（{len(fams)} 个族）：已打开「同步与恢复 → 补缺」")
+            log(f"快照缺字体 hook：{missing} 条 / {len(fams)} 族，样例 {fams[:3]}")
+        else:
+            toast("已打开「同步与恢复 → 补缺」")
+        return
     if hook != "context-menu":
         log(f"未处理的钩子：{hook}")
         return
