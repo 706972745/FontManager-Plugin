@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>字体库同步 · 设置</title>
 <style>
-  /* 设计 token 与 FontManager 主程序 design/tokens.css 同源（黑白灰、双主题）。 */
+  /* 下面这一组的取值源是主程序早期的 design/tokens.css（黑白灰、深色玻璃）。
+     现在实际生效的是文件末尾「对齐 FontManager 主界面」那一段的覆盖 ——
+     主程序已经换成纸墨 + 蓝强调，这里保留旧值只为「删掉新段即可回滚」。 */
   :root {
     color-scheme: light;
     --bg: #f4f4f7;
@@ -218,6 +220,416 @@
     border-radius: 0 0 10px 10px; padding: 2px 10px 8px;
   }
   @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+
+  /* ══════════════════════════════════════════════════════════════════
+     对齐 FontManager 主界面（R4 / R7 口径，2026-11-10）
+     ------------------------------------------------------------------
+     上面那一套是「深色玻璃 + 灰色强调」时代的写法：面板底色 #f4f4f7、
+     卡片 10px 圆角 + 投影、强调色 #3f3f46（黑白灰）。主程序已经换成
+     「纸 / 墨 + 单一蓝强调 + 9/11/13 字阶 + 1px 发丝线 + 0 圆角容器」，
+     面板窗口和主窗口并排放在同一块屏幕上，两套语言会像两个软件。
+
+     这一段不是重写，而是**覆盖**：先把设计令牌重映射成主程序那套
+     （取值逐条对齐 src/app.css 的 --qb-* / --ui-*），再把「卡片」
+     规整成「发丝线分区」。删掉本段即整体回滚。
+
+     主题：默认跟系统（@media prefers-color-scheme），并支持
+     <html data-theme="light|dark"> 强制 —— 主程序打开面板窗口时会
+     按自身的主题设置下发，见 src-tauri/src/plugins.rs。
+     ══════════════════════════════════════════════════════════════════ */
+
+  /* ─── 令牌：浅色（纸） ─────────────────────────────────────────────── */
+  :root {
+    color-scheme: light;
+    --bg: #fafaf8;              /* 主程序 --qb-bg */
+    --panel: #ffffff;           /* --ui-panel */
+    --card: #ffffff;
+    --ink: #141412;             /* --qb-fg */
+    --ink-2: #6b6b66;           /* --qb-fg-2 */
+    --ink-3: #9b9b95;           /* --qb-fg-3 */
+    --line: #e2e2dd;            /* --qb-hair */
+    --line-strong: #d2d2cc;     /* --qb-hair-strong：控件描边 */
+    --hover: #f1f1ed;           /* --qb-hover */
+    --accent: #1b4fe0;          /* --qb-accent */
+    --accent-2: #6b6b66;
+    --accent-soft: rgba(27, 79, 224, 0.08);
+    --on-accent: #ffffff;
+    --accent-grad: none;
+    --soft: rgba(20, 20, 18, 0.035);
+    --e1: rgba(20, 20, 18, 0.025);
+    --ok: #1b4fe0;
+    --warn: #6b6b66;
+    --bad: #e5484d;
+    --shadow-ground: none;
+    --r: 2px;
+  }
+  /* ─── 令牌：深色（墨） ─────────────────────────────────────────────── */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #111110;
+      --panel: #171715;
+      --card: #171715;
+      --ink: #f2f2ef;
+      --ink-2: #9a9a94;
+      --ink-3: #666660;
+      --line: #2a2a27;
+      --line-strong: #3a3a36;
+      --hover: #1c1c1a;
+      --accent: #5b8cff;
+      --accent-2: #9a9a94;
+      --accent-soft: rgba(91, 140, 255, 0.12);
+      --on-accent: #0e0e0e;
+      --soft: rgba(242, 242, 239, 0.04);
+      --e1: rgba(242, 242, 239, 0.03);
+      --ok: #5b8cff;
+      --warn: #9a9a94;
+      --bad: #e5484d;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #111110;
+    --panel: #171715;
+    --card: #171715;
+    --ink: #f2f2ef;
+    --ink-2: #9a9a94;
+    --ink-3: #666660;
+    --line: #2a2a27;
+    --line-strong: #3a3a36;
+    --hover: #1c1c1a;
+    --accent: #5b8cff;
+    --accent-2: #9a9a94;
+    --accent-soft: rgba(91, 140, 255, 0.12);
+    --on-accent: #0e0e0e;
+    --soft: rgba(242, 242, 239, 0.04);
+    --e1: rgba(242, 242, 239, 0.03);
+    --ok: #5b8cff;
+    --warn: #9a9a94;
+    --bad: #e5484d;
+  }
+
+  /* ─── 版心与字体 ───────────────────────────────────────────────────── */
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.65;
+  }
+  .wrap { max-width: 880px; padding: 24px 22px 56px; }
+  ::selection { background: var(--accent-soft); }
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: 1px;
+    border-radius: var(--r);
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--ink) 14%, transparent);
+    border: 3px solid transparent;
+    border-radius: 5px;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--ink) 24%, transparent);
+    background-clip: padding-box;
+  }
+
+  /* ─── 页头：方片标 + 16px 标题 + 发丝线胶囊状态 ─────────────────────── */
+  header { gap: 12px; margin-bottom: 16px; align-items: flex-start; }
+  .logo {
+    width: 30px; height: 30px; border-radius: var(--r);
+    background: none; border: 1px solid var(--line-strong);
+    color: var(--ink); font-family: var(--mono);
+    font-size: 13px; font-weight: 500;
+  }
+  h1 { font-size: 16px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.4; }
+  .sub { font-size: 11.5px; color: var(--ink-3); line-height: 1.6; }
+  .pill, .pill.ok, .pill.bad, .pill.warn {
+    background: none;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    color: var(--ink-2);
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 15px;
+    padding: 2px 8px;
+    letter-spacing: 0.02em;
+  }
+  .pill.ok {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--line-strong));
+  }
+  .pill.bad {
+    color: var(--bad);
+    border-color: color-mix(in srgb, var(--bad) 50%, var(--line-strong));
+  }
+
+  /* ─── 页签：0 圆角，选中用 2px 蓝下划线（与侧栏 2px 蓝竖线同一语言） ── */
+  nav {
+    gap: 0;
+    margin: 0 0 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  nav button {
+    border: 0;
+    border-radius: 0;
+    background: none;
+    padding: 7px 12px 9px;
+    font-size: 11.5px;
+    color: var(--ink-2);
+  }
+  nav button:hover { border: 0; background: none; color: var(--ink); }
+  nav button.on {
+    border: 0;
+    background: none;
+    color: var(--ink);
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+
+  /* ─── 分区：不再是一张圆角投影卡，而是「发丝线分栏」 ─────────────────── */
+  .card {
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    box-shadow: none;
+    padding: 16px 0 20px;
+    margin: 0;
+  }
+  .card h2 {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    gap: 10px;
+    margin: 0 0 8px;
+    line-height: 1.5;
+  }
+  /* 序号退成等宽小字 + 一条竖发丝线，不再是一枚渐变实心圆 */
+  .num {
+    width: auto; height: auto;
+    border-radius: 0;
+    background: none;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 9px;
+    line-height: 14px;
+    padding-right: 9px;
+    border-right: 1px solid var(--line);
+  }
+  .card p { font-size: 12.5px; margin: 7px 0; color: var(--ink-2); }
+  .card p.lead { color: var(--ink); }
+  .pick h3 { font-size: 12px; font-weight: 600; color: var(--ink); }
+
+  /* ─── 控件：30 高 / 2px 圆角 / 1px 描边（主程序设置里的按钮口径） ───── */
+  input[type=text], input[type=password], input[type=number], select {
+    height: 30px;
+    padding: 0 9px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r);
+    background: transparent;
+    color: var(--ink);
+    font-size: 12px;
+  }
+  input[type=text]:focus, input[type=password]:focus,
+  input[type=number]:focus, select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+  input[type=checkbox] { accent-color: var(--accent); width: 13px; height: 13px; }
+  label.f { font-size: 11px; color: var(--ink-3); letter-spacing: 0.01em; margin-bottom: 5px; }
+
+  button.act, a.btn {
+    height: 30px;
+    padding: 0 14px;
+    border-radius: var(--r);
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 11.5px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 180ms ease, border-color 180ms ease, color 180ms ease;
+  }
+  button.act:hover:not(:disabled) { filter: brightness(1.08); }
+  button.act.ghost, a.btn {
+    background: none;
+    color: var(--ink-2);
+    border-color: var(--line-strong);
+    font-weight: 400;
+  }
+  button.act.ghost:hover:not(:disabled), a.btn:hover {
+    color: var(--ink);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--line-strong));
+  }
+  button.act.danger {
+    background: none;
+    font-weight: 400;
+    color: var(--bad);
+    border-color: color-mix(in srgb, var(--bad) 45%, var(--line-strong));
+  }
+  button.act.danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--bad) 8%, transparent);
+    border-color: var(--bad);
+  }
+  button.act:disabled { opacity: 0.38; }
+
+  /* ─── 提示块：左侧 2px 竖条，不用整圈描边 + 圆角 ───────────────────────
+     普通说明不铺底色（纸墨底上铺灰块会变成「灰砖」，这正是主程序设置页
+     刚拆掉的东西）；只有「需要注意」和「会出事」两种才加底。 */
+  .note, .note.ok, .note.warn, .note.bad {
+    border: 0;
+    border-left: 2px solid var(--line-strong);
+    border-radius: 0;
+    background: none;
+    padding: 9px 12px;
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--ink-2);
+  }
+  .note b { color: var(--ink); font-weight: 600; }
+  /* 蓝色 = 「请注意」，红色 = 「会出事」；主程序里警示红只留给错误 */
+  .note.warn {
+    border-left-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .note.bad {
+    border-left-color: var(--bad);
+    background: color-mix(in srgb, var(--bad) 7%, transparent);
+  }
+
+  /* ─── 表格：只有横向发丝线 ─────────────────────────────────────────── */
+  table { font-size: 12px; margin-top: 12px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  /* 表头 10.5px（不是主程序标题那档 9px）：中文没有大小写可依赖，
+     9px 会直接糊成灰线；10.5 与插件分区的「清单头」同一档。 */
+  th {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--ink-3);
+  }
+  td.mono { font-family: var(--mono); font-size: 11px; }
+
+  /* ─── 徽标 / 标签 ─────────────────────────────────────────────────── */
+  .tag, .badge-cur {
+    background: none;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r);
+    color: var(--ink-2);
+    font-family: var(--mono);
+    font-size: 9px;
+    line-height: 14px;
+    padding: 1px 5px;
+  }
+  /* 「当前」是中文字，9px 等宽糊成一团；它也不是代码，换回正文字体 */
+  .badge-cur {
+    font-family: inherit;
+    font-size: 10px;
+    line-height: 15px;
+    padding: 0 6px;
+  }
+  .yes { color: var(--accent); }
+  .code, code { font-size: 11px; }
+
+  /* ─── 代码片段 ───────────────────────────────────────────────────── */
+  code, pre { font-family: var(--mono); font-size: 11px; }
+  code {
+    background: color-mix(in srgb, var(--ink) 5%, transparent);
+    padding: 1px 4px;
+    border-radius: var(--r);
+    color: var(--ink);
+  }
+  pre {
+    background: color-mix(in srgb, var(--ink) 3%, transparent);
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    padding: 10px 12px;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  .card p a, ol.steps a, details p a, .note a {
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .card p a:hover, ol.steps a:hover, details p a:hover, .note a:hover {
+    border-bottom-color: var(--accent);
+  }
+
+  /* ─── 折叠 / 列表 / 步骤 ───────────────────────────────────────────── */
+  details { border-top: 1px solid var(--line); padding: 8px 0; }
+  details summary { font-size: 12px; color: var(--ink-2); }
+  details summary:hover { color: var(--ink); }
+  ol.steps > li { margin: 12px 0; }
+  ol.steps > li::marker {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-3);
+  }
+  ul.plain li { margin: 4px 0; }
+  .acct { font-size: 12px; padding: 8px 0; }
+  .acct .who { font-weight: 500; }
+  .acct .mask { font-size: 11px; }
+
+  /* ─── 选库的两块方片 ──────────────────────────────────────────────── */
+  .pick {
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    background: none;
+    padding: 13px 14px;
+  }
+  details.fold > summary { border-radius: var(--r); background: none; font-size: 11.5px; }
+  details.fold[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  details.fold .fold-body { border-radius: 0 0 var(--r) var(--r); }
+
+  /* ─── 进度：3px 圆角轨 + 强调色填充（同插件分区里运行时下载那条） ───── */
+  .prog .bar { height: 3px; border-radius: 999px; background: var(--line); }
+  .prog .bar > i { border-radius: 999px; background: var(--accent); }
+  .prog.err .bar > i { background: var(--bad); }
+  .prog .txt { font-size: 11.5px; color: var(--ink-3); }
+  .prog .txt b { color: var(--ink); font-weight: 500; }
+
+  /* ─── 页脚 / 键帽 ─────────────────────────────────────────────────── */
+  footer {
+    margin-top: 8px;
+    padding-top: 14px;
+    border-top: 0;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.02em;
+    color: var(--ink-3);
+  }
+  .kbd {
+    font-size: 9px;
+    line-height: 14px;
+    padding: 0 4px;
+    border: 1px solid var(--line-strong);
+    border-bottom-width: 1px;
+    border-radius: 3px;
+    background: none;
+  }
+
+  /* ─── GitHub 登录验证弹层：内联样式写死了 #fff / #d7d7dd / 14px ──────── */
+  #verifyMask { background: rgba(0, 0, 0, 0.55) !important; }
+  #verifyMask > div {
+    background: var(--panel) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24) !important;
+    padding: 20px !important;
+    font-size: 13px !important;
+  }
+  #verifyMask h2 { font-size: 16px !important; font-weight: 650 !important; }
+  #verifyCode {
+    border: 1px dashed var(--line-strong) !important;
+    border-radius: var(--r) !important;
+    font-family: var(--mono) !important;
+    font-size: 22px !important;
+    letter-spacing: 0.28em !important;
+    color: var(--ink) !important;
+    background: var(--soft) !important;
+  }
 </style>
 </head>
 <body>
