@@ -196,6 +196,29 @@ class Gh:
             "anonymousReadable": self.repo_is_anonymous_readable(owner, name),
         }
 
+    def get_file_json(self, owner, name, path, branch="main"):
+        """读仓库里的一个 JSON 文件；不存在返回 None。
+
+        用 Contents API（`GET /contents/{path}`）：文件小（几 KB），一次拿完。
+        返回体里的 content 是 base64（带换行），b64decode 会自己忽略换行。
+        """
+        import base64
+
+        try:
+            _, body = self.request("GET", f"/repos/{owner}/{name}/contents/{path}?ref={branch}")
+        except GhError as e:
+            if e.status == 404:
+                return None
+            raise
+        content = (body or {}).get("content") or ""
+        if not content:
+            return None
+        try:
+            return json.loads(base64.b64decode(content).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            # 仓库里那份坏了：当作没有，下次 push 会覆盖成干净的一份
+            return None
+
     def branch_sha(self, owner, name, branch):
         """分支的最新提交；空仓（还没有任何 commit）返回 None。"""
         try:

@@ -17,6 +17,7 @@ import re
 import tempfile
 import time
 
+import meta
 import packer
 import store
 
@@ -50,6 +51,9 @@ class LocalApi:
 
     def post(self, path, body=None):
         return self._request("POST", path, body)
+
+    def put(self, path, body=None):
+        return self._request("PUT", path, body)
 
     def _request(self, method, path, body=None):
         import urllib.error
@@ -620,6 +624,14 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
         except Exception as e:
             log(f"记账提交失败（不影响 asset，下次会重记）：{e}")
 
+    # 元数据（标签 / 评分 / 收藏 / 备注）跟字体一起备份：换机器时这些才不用重来一遍。
+    # 单独 try：元数据失败绝不能影响字体同步本身。
+    if not dry_run and (cfg.get("syncCuration") is not False):
+        try:
+            meta.push(gh, api, owner, name, branch, log=log)
+        except Exception as e:  # noqa: BLE001
+            log(f"元数据同步失败（不影响字体）：{e}")
+
     summary["deleted"] = flush_pending_deletes(gh, state, owner, name, log)
     state["lastSyncAt"] = int(time.time() * 1000)
     store.save_state(state)
@@ -906,6 +918,13 @@ def run_restore(gh, api, cfg, state, dry_run=False, overwrite=False, only=None,
         except Exception as e:
             summary["rescan"] = f"重扫失败（字体已经写进库，手动点一次「重新扫描」即可）：{e}"
             log(summary["rescan"])
+
+    # 字体到位后再合并元数据：只写有差异的项，写失败不影响已经下载的字体。
+    if not dry_run and (cfg.get("syncCuration") is not False):
+        try:
+            meta.pull(gh, api, owner, name, _branch, only=only, log=log)
+        except Exception as e:  # noqa: BLE001
+            log(f"元数据恢复失败（不影响字体）：{e}")
 
     state["lastRestoreAt"] = int(time.time() * 1000)
     store.save_state(state)

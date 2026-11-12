@@ -1,7 +1,7 @@
 {
   "id": "com.fontmanager.font-sync",
   "name": "字体库同步（GitHub）",
-  "version": "0.8.18",
+  "version": "0.9.0",
   "apiLevel": 1,
   "entry": "main.py",
   "interpreter": "python",
@@ -16,14 +16,16 @@
     "platforms": [
       "Windows"
     ],
-    "note": "不自带解释器：需要软件「设置 → 插件 → 运行时管理」里的 Python，或系统 Python 3.10+。零第三方库。令牌存 Windows 凭据管理器，不在插件目录；上传与复制令牌需先在浏览器登录对应 GitHub 账号，下载不需要验证。"
+    "note": "不自带解释器：需要软件「设置 → 插件 → 运行时管理」里的 Python，或系统 Python 3.10+。零第三方库。令牌存 Windows 凭据管理器，不在插件目录；上传与复制令牌需先在浏览器登录对应 GitHub 账号，下载不需要验证。 0.9.0 起同时同步标签 / 评分 / 收藏 / 备注（需要 read:curation 与 write:curation 权限）。"
   },
-  "summary": "把字体库增量备份到你自己的私有 GitHub 仓库，也能一键下载回本机；只传变化的字族，零第三方依赖",
+  "summary": "把字体库连同标签/评分/收藏/备注一起增量备份到你的私有 GitHub 仓库",
   "description": "把字体库按字族打包，增量同步到你自己的私有 GitHub 仓库（可存多个账号、切换多个库）；也能反过来把远端的字体下载回这台电脑（新机器一键装满字库），下载后自动重扫。没配好账号与库之前不同步任何内容；只传变化的字族；本地删除会同步删除远端备份（可关）。设置面板开在应用内窗口（1.4.3+），含令牌权限说明与从零开始的教程。零第三方依赖",
   "permissions": [
     "read:fonts",
     "write:fonts",
-    "read:snapshot"
+    "read:snapshot",
+    "read:curation",
+    "write:curation"
   ],
   "hooks": [
     "init",
