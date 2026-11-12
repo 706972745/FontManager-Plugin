@@ -23,8 +23,8 @@ PLUGIN_NAME = "font-sync"
 DATE = (1980, 1, 1, 0, 0, 0)
 
 # 白名单：只有这些进包
-FILES = ["main.py", "gh.py", "store.py", "packer.py", "syncer.py", "panel.py",
-         "panel.html", "plugin.json", "README.md"]
+FILES = ["main.py", "gh.py", "store.py", "meta.py", "packer.py", "syncer.py", "verify.py",
+         "panel.py", "panel.html", "plugin.json", "README.md"]
 DIRS = [("tests", (".py",))]
 
 

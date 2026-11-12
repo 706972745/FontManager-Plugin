@@ -32,7 +32,7 @@ OUT = os.path.join(ROOT, "dist")
 # font-sync 走「纯代码」策略：它零第三方依赖，runtime 由主程序注入
 FONT_SYNC = "font-sync"
 FONT_SYNC_CODE = ["plugin.json", "main.py", "panel.py", "panel.html", "gh.py", "packer.py",
-                  "store.py", "syncer.py", "verify.py", "README.md"]
+                  "store.py", "meta.py", "syncer.py", "verify.py", "README.md"]
 
 # 其它插件「整目录」打包：自带 runtime/，用户解压后直接是一个文件夹
 FULL_DIR_PLUGINS = ["font-apply", "font-stats", "specimen-export", "template-hello"]

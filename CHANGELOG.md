@@ -9,6 +9,22 @@
 自动生成（见 `.github/workflows/plugin-release.yml` 的「同步发布说明」），
 所以改插件版本时请同步在这里补一条，别只改 `plugin.json`。
 
+## 2026-11-13
+
+### 修复（font-sync 0.9.3）
+
+- **装完就报「插件没在运行」**：打包白名单漏了 `meta.py`（0.9.0 起 `syncer.py` 会 import 它），
+  CI 与本地两份清单都没列，打出来的包里没有这个文件 —— 激活时
+  `main.py → panel → syncer → import meta` 直接 `ModuleNotFoundError`，
+  主程序因此显示「插件没在运行」，真实堆栈只留在 `activation.log` 里。
+  `.github/package_plugin.py` 的 `FONT_SYNC_CODE` 与 `font-sync/build_zip.py` 的 `FILES`
+  都补上 `meta.py`；顺带发现 `build_zip.py` 的 `FILES` 还漏了 `verify.py`（`main.py` /
+  `panel.py` 都 import 了它，所以本地给同事打的包同样装不起来），一并补上 ——
+  现在两份清单覆盖全部 7 个本地模块。
+- 新增 `font-sync/tests/test_packaging.py`：用 `ast` 解析 `font-sync/*.py` 的 import，
+  断言每个「被 import 的本地模块」都在上面两份白名单里，再漏文件时 CI 直接红掉，
+  不用等用户装完才发现。
+
 ## 2026-11-12
 
 ### 变更（font-sync 0.9.2）
