@@ -916,7 +916,16 @@ def run_restore(gh, api, cfg, state, dry_run=False, overwrite=False, only=None,
             summary["rescan"] = f"重扫完成，本机现在 {len(group_by_family(after))} 个字族"
             log(summary["rescan"])
         except Exception as e:
-            summary["rescan"] = f"重扫失败（字体已经写进库，手动点一次「重新扫描」即可）：{e}"
+            msg = str(e)
+            if "403" in msg:
+                # 主程序 1.9.25 起：重扫属于「重大操作」，要单独授权本插件
+                summary["rescan"] = (
+                    "重扫被拦下了（主程序 1.9.25 起「重扫」属于重大操作）：到 设置 → 本地 API "
+                    "打开「允许危险操作」，并在「允许谁做重大操作」里勾选本插件；"
+                    "字体已经写进库，授权后手动点一次「重新扫描」即可"
+                )
+            else:
+                summary["rescan"] = f"重扫失败（字体已经写进库，手动点一次「重新扫描」即可）：{e}"
             log(summary["rescan"])
 
     # 字体到位后再合并元数据：只写有差异的项，写失败不影响已经下载的字体。
