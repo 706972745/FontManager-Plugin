@@ -18,7 +18,7 @@
     ],
     "note": "零第三方库、不自带解释器。套用由主程序执行（POST /fonts/apply），本插件只负责选字体、认目标、翻提示，所以不需要 pywin32，也不会和主程序的引擎跑偏。需要 FontManager 1.9.11 及以上（端点与 write:apply / read:apps 权限从这版开始有）。"
   },
-  "summary": "右键任意字族 → 直接套用到 Photoshop / Illustrator / CorelDRAW，复用主程序的套用引擎",
+  "summary": "右键字族或速览双击 → 直接套到 PS / AI / CDR 当前选中的文字",
   "description": "右键一个字族，选「应用到 Photoshop / Illustrator / CorelDRAW」，字体就套到目标软件当前选中的文字上（没选文字会新建一个文本框）。也可以选「自动」，由主程序判断最近在用的那个设计软件。套用本身由主程序执行（复用主程序里那套引擎：启用检查、缺中文提醒、CorelDRAW 常驻宿主、结果提示），本插件只负责挑字重、认目标、把结果翻成一句人话，所以插件里没有任何 COM / JSX / PowerShell 代码。要求目标软件已在运行、字体已在 FontManager 里启用（启用后需要重启一次目标软件才能看见新字体）。",
   "permissions": [
     "read:fonts",

@@ -124,11 +124,22 @@ def verify(path, plugin, version):
 
 
 def one_liner(plugin):
-    """表格里的一句话说明：优先 summary，否则取 description 的第一句。"""
+    """表格里的一句话说明：优先 summary，否则取 description 的第一句。
+
+    超过 60 字时**在标点或空格处收尾**，不要硬切在第 59 个字上 ——
+    切一半的句子（「…复用主程序的套用…」）看着像没写完。
+    """
     m = manifest(plugin)
     text = (m.get("summary") or m.get("description") or "").strip()
     text = re.split(r"[；。]", text)[0]
-    return text if len(text) <= 60 else text[:59] + "…"
+    if len(text) <= 60:
+        return text
+    head = text[:60]
+    for sep in ("，", "、", " ", "→"):
+        cut = head.rfind(sep)
+        if cut >= 30:
+            return head[:cut].rstrip() + "…"
+    return head.rstrip() + "…"
 
 
 def requirements_cell(plugin):

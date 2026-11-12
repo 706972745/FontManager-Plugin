@@ -56,7 +56,7 @@
 
 | 插件 | 版本 | 说明 | 下载 |
 |---|---|---|---|
-| [字体套用（PS / AI / CDR）](font-apply/) | 1.1.1 | 右键任意字族 → 直接套到 Photoshop / Illustrator / CorelDRAW 当前选中的文字上；四条菜单（三个软件 + 「自动：最近在用的那个」）。**速览界面里双击任意可复制的位置也会套用**（主程序 1.9.12+，1.9.13 起仅限速览），双击行为可在插件设置里选「直接套用」或「先点一下目标窗口」。它是个**薄插件**：套用由主程序执行（`POST /fonts/apply`），插件只挑字重、认目标、翻提示，里面没有一行 COM / JSX / PowerShell —— 主程序修好的问题，插件不会拖后腿。要求 FontManager **1.9.11+**（常驻提示要 1.9.14+，CorelDRAW 字重修复在 1.9.20+） | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/font-apply.zip) |
+| [字体套用（PS / AI / CDR）](font-apply/) | 1.1.2 | 右键任意字族 → 直接套到 Photoshop / Illustrator / CorelDRAW 当前选中的文字上；四条菜单（三个软件 + 「自动：最近在用的那个」）。**速览界面里双击任意可复制的位置也会套用**（主程序 1.9.12+，1.9.13 起仅限速览），双击行为可在插件设置里选「直接套用」或「先点一下目标窗口」。它是个**薄插件**：套用由主程序执行（`POST /fonts/apply`），插件只挑字重、认目标、翻提示，里面没有一行 COM / JSX / PowerShell —— 主程序修好的问题，插件不会拖后腿。要求 FontManager **1.9.11+**（常驻提示要 1.9.14+，CorelDRAW 字重修复在 1.9.20+） | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/font-apply.zip) |
 
 ### ☁️ 备份 / 多机同步
 

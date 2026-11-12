@@ -10,7 +10,9 @@
     "runtime": "Python 3.13（插件自带）",
     "libraries": [],
     "system": [],
-    "platforms": ["Windows"],
+    "platforms": [
+      "Windows"
+    ],
     "note": "ZIP 内含 runtime/python.exe，机器上不用装 Python；代码只用标准库，包里带的 Pillow / fontTools 是共享运行时的冗余内容，本插件用不到。"
   },
   "permissions": [
@@ -26,5 +28,6 @@
       "on": "family"
     }
   ],
-  "interpreterPath": "runtime/python.exe"
+  "interpreterPath": "runtime/python.exe",
+  "summary": "右键字族 → 统计字面数与版权分类，结果写进备注"
 }
