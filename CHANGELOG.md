@@ -9,6 +9,24 @@
 自动生成（见 `.github/workflows/plugin-release.yml` 的「同步发布说明」），
 所以改插件版本时请同步在这里补一条，别只改 `plugin.json`。
 
+## 2026-11-12
+
+### 新增（font-apply 1.0.0）
+
+- **新插件「字体套用（PS / AI / CDR）」**：右键任意字族 → 直接套用到
+  Photoshop / Illustrator / CorelDRAW 当前选中的文字上（没选文字就新建一个文本框）。
+  四条菜单：应用到 Photoshop / Illustrator / CorelDRAW，以及「自动：应用到最近使用的设计软件」。
+- **它自己不做套用**：套用由主程序执行（`POST /api/v1/fonts/apply`，FontManager 1.9.11 起）。
+  主程序那套引擎已经有启用检查、缺中文提醒、CorelDRAW 常驻 COM 宿主、9 种 outcome 的处理；
+  插件复制一份就等于「主程序修好的问题插件里还在」，两边提示也会慢慢分叉。
+  所以这个插件里**一行 COM / JSX / PowerShell 都没有**，零第三方库，也不自带解释器。
+- **「自动」怎么认目标**：`GET /api/v1/apps/active` —— 前台是 FontManager 自己或
+  任务栏 / 桌面时沿 Z 序往下翻，第一个属于 PS/AI/CDR 的窗口就是答案，
+  所以「点任务栏切过去」也认。
+- 权限只申请三项：`read:fonts`（挑字面）、`write:apply`（套用）、`read:apps`（认目标）。
+- 要求 FontManager **1.9.11+**；装在更老的主程序上会提示「没找到正在运行的设计软件」
+  而不是崩掉（新端点在老版本上是 404）。
+
 ## 2026-11-11
 
 ### 新增（font-sync 0.8.18）
