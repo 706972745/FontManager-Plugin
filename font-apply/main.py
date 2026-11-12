@@ -122,13 +122,25 @@ def target_for_menu(title):
     return None
 
 
-def pick_face(faces):
-    """挑一个能用来套用的字面：Regular 优先，否则第一个有 PostScript 名的。
+def pick_face(faces, want_id=None):
+    """挑一个能用来套用的字面。
+
+    优先级：
+    1. `want_id`（主程序双击转发时点名的那一行字重，1.0.1 起）；
+    2. Regular；
+    3. 第一个有 PostScript 名的。
 
     只认有 PostScript 名的：没有名字就没法在目标软件里定位，套用必然失败，
     不如在这里就换下一个。
     """
     usable = [f for f in faces if (f.get("postscriptName") or "").strip()]
+    if want_id:
+        for face in usable:
+            if face.get("id") == want_id:
+                return face
+        # 点名了却找不到（插件拿到的清单和主程序不同步，或者这个字面没有 PS 名）：
+        # 记一行再回退，否则「双击 Bold 却套了 Regular」会变成一条无线索的怪现象
+        log("主程序点名了字面 %s，但这个字族里没有可用的同名同 id 字面，回退到 Regular" % want_id)
     for face in usable:
         if (face.get("style") or "") == "Regular":
             return face
@@ -186,8 +198,11 @@ def describe(outcome, app, label, family, active):
 
 
 def on_context_menu(payload):
-    family = (payload or {}).get("family") or ""
-    menu = (payload or {}).get("menu") or ""
+    payload = payload or {}
+    family = payload.get("family") or ""
+    menu = payload.get("menu") or ""
+    # 主程序双击转发时带上是哪一行字重（1.0.1）；从右键菜单点则没有这个字段
+    want_face = payload.get("faceId") or ""
     if not family:
         log("没有拿到字族名，跳过")
         return
@@ -201,7 +216,7 @@ def on_context_menu(payload):
     if not faces:
         toast("字体库里找不到「%s」" % family)
         return
-    face = pick_face(faces)
+    face = pick_face(faces, want_face)
     if face is None:
         toast("这个字族没有可用的字面（都没有 PostScript 名）")
         return
