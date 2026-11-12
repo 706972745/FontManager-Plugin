@@ -1,7 +1,7 @@
 {
   "id": "com.fontmanager.font-apply",
   "name": "字体套用（PS / AI / CDR）",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "apiLevel": 1,
   "entry": "main.py",
   "interpreter": "python",
@@ -13,7 +13,9 @@
       "Photoshop / Illustrator / CorelDRAW",
       "FontManager 1.9.11+"
     ],
-    "platforms": ["Windows"],
+    "platforms": [
+      "Windows"
+    ],
     "note": "零第三方库、不自带解释器。套用由主程序执行（POST /fonts/apply），本插件只负责选字体、认目标、翻提示，所以不需要 pywin32，也不会和主程序的引擎跑偏。需要 FontManager 1.9.11 及以上（端点与 write:apply / read:apps 权限从这版开始有）。"
   },
   "summary": "右键任意字族 → 直接套用到 Photoshop / Illustrator / CorelDRAW，复用主程序的套用引擎",
@@ -25,7 +27,8 @@
   ],
   "hooks": [
     "init",
-    "context-menu"
+    "context-menu",
+    "settings"
   ],
   "menus": [
     {
@@ -43,6 +46,14 @@
     {
       "title": "自动：应用到最近使用的设计软件",
       "on": "family"
+    },
+    {
+      "title": "双击行为…",
+      "on": "plugin"
     }
-  ]
+  ],
+  "settings": {
+    "title": "字体套用 · 设置",
+    "hook": "settings"
+  }
 }
