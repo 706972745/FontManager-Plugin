@@ -55,14 +55,15 @@ class NormalizeTests(unittest.TestCase):
             "favorites": ["A", "", None, "B"],
             "ratings": {"A": 4, "B": 9, "C": "x", "D": 0},
             "notes": {"A": "  hi  ", "B": "", "C": None},
-            "collections": {"分组": ["A"]},  # 分组不参与同步
+            "collections": {"分组": ["A", "A", " "], "空组": []},
         }
         out = meta.normalize(raw)
         self.assertEqual(out["tags"], {"A": ["x", "y"]})
         self.assertEqual(out["favorites"], ["A", "B"])
         self.assertEqual(out["ratings"], {"A": 4})
         self.assertEqual(out["notes"], {"A": "hi"})
-        self.assertEqual(set(out), {"tags", "favorites", "ratings", "notes"})
+        self.assertEqual(out["collections"], {"分组": ["A"]})
+        self.assertEqual(set(out), {"tags", "favorites", "ratings", "notes", "collections"})
 
     def test_empty_and_bad_input(self):
         self.assertEqual(meta.normalize(None), meta.EMPTY)
@@ -75,12 +76,14 @@ class MergeTests(unittest.TestCase):
         "favorites": ["族1"],
         "ratings": {"族1": 3},
         "notes": {"族1": "短"},
+        "collections": {"常用": ["族1"]},
     }
     B = {
         "tags": {"族1": ["标题", "免费"], "族2": ["无衬线"]},
         "favorites": ["族2"],
         "ratings": {"族1": 5, "族2": 4},
         "notes": {"族1": "更长的备注", "族2": "备注"},
+        "collections": {"常用": ["族1", "族2"], "新组": ["族2"]},
     }
 
     def test_union_and_max(self):
@@ -89,6 +92,8 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(out["favorites"], ["族1", "族2"])
         self.assertEqual(out["ratings"], {"族1": 5, "族2": 4})
         self.assertEqual(out["notes"]["族1"], "更长的备注")
+        self.assertEqual(out["collections"]["常用"], ["族1", "族2"])
+        self.assertEqual(out["collections"]["新组"], ["族2"])
 
     def test_commutative(self):
         self.assertEqual(meta.merge(self.A, self.B), meta.merge(self.B, self.A))
@@ -105,13 +110,16 @@ class MergeTests(unittest.TestCase):
 
 class DiffAndApplyTests(unittest.TestCase):
     def test_diff_only_reports_changes(self):
-        local = {"tags": {"A": ["x"]}, "favorites": ["A"], "ratings": {"A": 5}, "notes": {"A": "n"}}
-        merged = {"tags": {"A": ["x"]}, "favorites": ["A", "B"], "ratings": {"A": 5}, "notes": {"A": "n2"}}
+        local = {"tags": {"A": ["x"]}, "favorites": ["A"], "ratings": {"A": 5}, "notes": {"A": "n"},
+                 "collections": {"组": ["A"]}}
+        merged = {"tags": {"A": ["x"]}, "favorites": ["A", "B"], "ratings": {"A": 5}, "notes": {"A": "n2"},
+                  "collections": {"组": ["A", "B"]}}
         out = meta.diff(local, merged)
         self.assertEqual(out["tags"], {})
         self.assertEqual(out["favorites"], ["B"])
         self.assertEqual(out["ratings"], {})
         self.assertEqual(out["notes"], {"A": "n2"})
+        self.assertEqual(out["collections"], {"组": ["A", "B"]})
 
     def test_apply_writes_only_diff_and_respects_only(self):
         api = FakeApi()
@@ -129,6 +137,30 @@ class DiffAndApplyTests(unittest.TestCase):
         meta.apply(api2, local, merged, only={"B"}, log=lambda *_: None)
         fams = {body["family"] for _, body in api2.puts}
         self.assertEqual(fams, {"B"})
+
+    def test_apply_writes_collections(self):
+        api = FakeApi()
+        local = meta.EMPTY
+        merged = {"tags": {}, "favorites": [], "ratings": {}, "notes": {},
+                  "collections": {"常用": ["A", "B"]}}
+        done = meta.apply(api, local, merged, log=lambda *_: None)
+        self.assertEqual(done, 1)
+        self.assertEqual(api.puts[0][0], "/curation/collection")
+        self.assertEqual(api.puts[0][1], {"name": "常用", "families": ["A", "B"]})
+
+    def test_apply_skips_collections_on_old_main(self):
+        class Old(FakeApi):
+            def put(self, path, body):
+                if path == "/curation/collection":
+                    raise RuntimeError("本地 API 404：not found")
+                return super().put(path, body)
+
+        api = Old()
+        merged = {"tags": {}, "favorites": ["A"], "ratings": {}, "notes": {},
+                  "collections": {"常用": ["A"]}}
+        done = meta.apply(api, meta.EMPTY, merged, log=lambda *_: None)
+        self.assertEqual(done, 1)  # 收藏成功，分组 404 被跳过
+        self.assertEqual([p for p, _ in api.puts], ["/curation/favorite"])
 
     def test_apply_swallows_single_failure(self):
         class Flaky(FakeApi):

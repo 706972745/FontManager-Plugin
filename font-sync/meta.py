@@ -18,8 +18,9 @@
 这四条都满足「交换律 + 幂等」：A 合并 B 和 B 合并 A 结果一样，重复合并也不会变。
 所以哪台机器先提交都不会覆盖别人 —— 这是「多机一致」在没有 tombstones 时能做到的最好版本。
 
-`collections`（分组）**不同步**：主程序的本地 API 还没有写分组的端点，
-硬塞进去只会造成「云端有、本机写不进去」的假象。等主程序补了端点再加。
+`collections`（分组）从 0.9.1 起也同步：主程序 1.9.24 补了 `PUT /curation/collection`
+（写一个分组的**完整**成员名单）。合并口径同样是并集；老主程序没有这个端点时
+会 404，插件只记一行日志、跳过分组，标签/评分/收藏/备注照旧。
 """
 
 import json
@@ -27,7 +28,7 @@ import json
 # 仓库里的路径。放 ops/ 下面，跟记账文件同一个目录，不污染字体包。
 CURATION_PATH = "ops/curation.json"
 
-EMPTY = {"tags": {}, "favorites": [], "ratings": {}, "notes": {}}
+EMPTY = {"tags": {}, "favorites": [], "ratings": {}, "notes": {}, "collections": {}}
 
 
 def normalize(raw):
@@ -64,7 +65,16 @@ def normalize(raw):
         if text:
             notes[str(fam)] = text
 
-    return {"tags": tags, "favorites": favorites, "ratings": ratings, "notes": notes}
+    collections = {}
+    for name, arr in (raw.get("collections") or {}).items():
+        if not isinstance(arr, list):
+            continue
+        members = sorted({str(f).strip() for f in arr if f is not None and str(f).strip()})
+        if members:
+            collections[str(name)] = members
+
+    return {"tags": tags, "favorites": favorites, "ratings": ratings, "notes": notes,
+            "collections": collections}
 
 
 def merge(a, b):
@@ -86,18 +96,25 @@ def merge(a, b):
         left, right = a["notes"].get(fam, ""), b["notes"].get(fam, "")
         notes[fam] = left if len(left) >= len(right) else right
 
+    collections = {}
+    for name in set(a["collections"]) | set(b["collections"]):
+        members = sorted(set(a["collections"].get(name, [])) | set(b["collections"].get(name, [])))
+        if members:
+            collections[name] = members
+
     return {
         "tags": tags,
         "favorites": sorted(set(a["favorites"]) | set(b["favorites"])),
         "ratings": ratings,
         "notes": notes,
+        "collections": collections,
     }
 
 
 def diff(local, merged):
     """合并后**真正需要写回本机**的那部分（只写差异，不把整库 PUT 一遍）。"""
     local, merged = normalize(local), normalize(merged)
-    out = {"tags": {}, "favorites": [], "ratings": {}, "notes": {}}
+    out = {"tags": {}, "favorites": [], "ratings": {}, "notes": {}, "collections": {}}
 
     for fam, tags in merged["tags"].items():
         if local["tags"].get(fam) != tags:
@@ -113,6 +130,10 @@ def diff(local, merged):
     for fam, note in merged["notes"].items():
         if local["notes"].get(fam) != note:
             out["notes"][fam] = note
+
+    for name, members in merged["collections"].items():
+        if local["collections"].get(name) != members:
+            out["collections"][name] = members
 
     return out
 
@@ -163,6 +184,20 @@ def apply(api, local, merged, only=None, log=print):
         except Exception as e:  # noqa: BLE001
             log(f"  ! 备注写回失败 {fam}：{e}")
 
+    # 分组：主程序 1.9.24+ 才有这个端点；老版本 404，记一次日志就跳过，
+    # 不让它把整轮写回打断（标签/评分/收藏/备注已经写完了）。
+    for name, members in todo["collections"].items():
+        if allowed is not None and not (set(members) & allowed):
+            continue
+        try:
+            api.put("/curation/collection", {"name": name, "families": members})
+            done += 1
+        except Exception as e:  # noqa: BLE001
+            if "404" in str(e):
+                log("  ! 主程序没有写分组的端点（要 1.9.24+），本次跳过分组")
+                break
+            log(f"  ! 分组写回失败 {name}：{e}")
+
     return done
 
 
@@ -170,7 +205,8 @@ def summary(meta):
     """一行人类可读的概况，给日志用。"""
     meta = normalize(meta)
     return (f"{len(meta['tags'])} 个族有标签、{len(meta['ratings'])} 个有评分、"
-            f"{len(meta['favorites'])} 个收藏、{len(meta['notes'])} 条备注")
+            f"{len(meta['favorites'])} 个收藏、{len(meta['notes'])} 条备注、"
+            f"{len(meta['collections'])} 个分组")
 
 
 def push(gh, api, owner, name, branch, log=print):

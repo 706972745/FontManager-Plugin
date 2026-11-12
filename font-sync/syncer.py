@@ -532,16 +532,16 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
             _report(progress, "pack", done=done, total=len(todo), family=family,
                     index=index, bytes=summary["bytes"], bytesTotal=total_bytes)
             try:
-                meta = packer.pack_family(os.path.join(tmpdir, "f.zip"), item["paths"],
+                packed = packer.pack_family(os.path.join(tmpdir, "f.zip"), item["paths"],
                                           family=family)
                 prev = (led["families"].get(family) or {})
-                if prev.get("hash") == meta["hash"] and prev.get("asset"):
+                if prev.get("hash") == packed["hash"] and prev.get("asset"):
                     log(f"  内容未变（只动了时间戳）：{family}")
                     led["families"][family] = dict(prev, fingerprint=item["fingerprint"])
                     continue
                 if release_id is None or len(entries) >= 888:
                     release_id, bucket_tag = gh.find_or_create_bucket(owner, name)
-                asset = packer.asset_name(family, meta)
+                asset = packer.asset_name(family, packed)
                 with open(os.path.join(tmpdir, "f.zip"), "rb") as fh:
                     blob = fh.read()
                 asset_obj = _upload_blob(gh, owner, name, release_id, asset, blob, log)
@@ -561,18 +561,18 @@ def run_sync(gh, api, cfg, state, only_family=None, dry_run=False, log=print,
                         {"assetId": old, "name": prev.get("asset"),
                          "deleteAfter": int(time.time()) + delete_after})
                 led["families"][family] = {
-                    "fingerprint": item["fingerprint"], "hash": meta["hash"],
+                    "fingerprint": item["fingerprint"], "hash": packed["hash"],
                     "asset": asset, "assetId": asset_id, "bucket": bucket_tag,
-                    "size": meta["size"], "fonts": meta["fonts"],
-                    "docs": meta["docs"], "at": int(time.time() * 1000),
+                    "size": packed["size"], "fonts": packed["fonts"],
+                    "docs": packed["docs"], "at": int(time.time() * 1000),
                 }
-                entries.append({"family": family, "asset": asset, "hash": meta["hash"],
-                                "size": meta["size"], "fonts": meta["fonts"],
+                entries.append({"family": family, "asset": asset, "hash": packed["hash"],
+                                "size": packed["size"], "fonts": packed["fonts"],
                                 "bucket": bucket_tag})
                 summary["uploaded"] += 1
-                summary["bytes"] += meta["size"]
+                summary["bytes"] += packed["size"]
                 done += 1
-                log(f"  ↑ {family}（{meta['fonts']} 字面 {meta['size']/1048576:.2f} MB）→ {bucket_tag}")
+                log(f"  ↑ {family}（{packed['fonts']} 字面 {packed['size']/1048576:.2f} MB）→ {bucket_tag}")
                 _report(progress, "upload", done=done, total=len(todo), family=family,
                         index=index, bytes=summary["bytes"], bytesTotal=total_bytes)
                 if done % 20 == 0:
