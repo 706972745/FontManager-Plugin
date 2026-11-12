@@ -347,9 +347,18 @@ def on_context_menu(payload):
     # 主程序双击转发时带上被双击的那一行字重（1.0.1）；从右键菜单点则没有这个字段
     face_id = payload.get("faceId") or ""
 
-    # `on:"plugin"` 的设置入口：没有 family，只开面板
+    # `on:"plugin"` 的设置入口：没有 family。菜单里直接给了两个模式项，
+    # 点一下就地切换（不弹面板）——「想换一下」和「想看看设置」是两件事。
     if not family:
-        if menu.startswith(SETTINGS_MENU_PREFIX):
+        if menu.startswith("双击行为：直接套用") or menu.startswith("双击行为：自动"):
+            config.save({"doubleClickMode": "auto"})
+            log("双击行为已切换为 auto")
+            toast("双击行为已切换为「直接套用到最近在用的设计软件」")
+        elif menu.startswith("双击行为：先选窗口"):
+            config.save({"doubleClickMode": "pick"})
+            log("双击行为已切换为 pick")
+            toast("双击行为已切换为「先点一下目标窗口」")
+        elif menu.startswith(SETTINGS_MENU_PREFIX):
             open_settings()
         else:
             log("没有拿到字族名，跳过")

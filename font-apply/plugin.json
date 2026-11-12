@@ -1,7 +1,7 @@
 {
   "id": "com.fontmanager.font-apply",
   "name": "字体套用（PS / AI / CDR）",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "apiLevel": 1,
   "entry": "main.py",
   "interpreter": "python",
@@ -46,6 +46,14 @@
     {
       "title": "自动：应用到最近使用的设计软件",
       "on": "family"
+    },
+    {
+      "title": "双击行为：直接套用（自动）",
+      "on": "plugin"
+    },
+    {
+      "title": "双击行为：先选窗口",
+      "on": "plugin"
     },
     {
       "title": "双击行为…",
