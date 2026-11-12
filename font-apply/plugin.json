@@ -1,7 +1,7 @@
 {
   "id": "com.fontmanager.font-apply",
   "name": "字体套用（PS / AI / CDR）",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "apiLevel": 1,
   "entry": "main.py",
   "interpreter": "python",

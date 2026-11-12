@@ -51,6 +51,10 @@ MENU_TARGETS = (
 # 设置页那条 `on:"plugin"` 菜单（点它等同于点齿轮）
 SETTINGS_MENU_PREFIX = "双击行为"
 
+# pick 模式那条常驻提示（1.9.14 的 hint 通道），文案与时长都在这里定
+PICK_HINT = "点一下要应用到的窗口 · 15 秒内"
+PICK_HINT_SECONDS = 15
+
 # 套用要起 PowerShell 并轮询目标软件：PS/AI 最多 30 秒、CorelDRAW 最多 60 秒。
 # 客户端给 90 秒，比引擎的上限宽一点，免得「其实成功了但客户端先超时」。
 APPLY_TIMEOUT = 90
@@ -80,6 +84,19 @@ def emit_open_url(url, title):
     """请主程序开一个应用内窗口加载 url（1.4.3+）。"""
     sys.stdout.write(
         json.dumps({"type": "open-url", "url": url, "title": title}, ensure_ascii=False)
+        + "\n"
+    )
+    sys.stdout.flush()
+
+
+def emit_hint(text, seconds=15):
+    """要一条**常驻**提示（主程序 1.9.14+，速览元信息行渲染）。
+
+    `text` 为空串 = 立刻清除。老版本主程序不认这个消息，只会忽略 ——
+    所以调用方该给的 toast 一个都不能省（提示是加分项，不是唯一通道）。
+    """
+    sys.stdout.write(
+        json.dumps({"type": "hint", "text": text, "seconds": seconds}, ensure_ascii=False)
         + "\n"
     )
     sys.stdout.flush()
@@ -270,9 +287,15 @@ def apply_pick(family, face_id):
     if not pick.IS_WINDOWS:
         toast("「先选窗口」只在 Windows 上可用")
         return
-    # 先提示再开始等：用户得知道现在该点一下窗口，而不是以为双击没反应
-    toast("点一下要应用到的窗口（15 秒内）")
-    result = pick.wait_for_target()
+    # 常驻提示（1.9.14 的 hint 通道）：用户得一直看得见「现在该点一下窗口」——
+    # toast 一两秒就没了，等他低头去找窗口时提示已经消失，只剩一个不知道该干什么的面板。
+    # 所以这里**不再**发同文案的 toast，避免两条重复。
+    emit_hint(PICK_HINT, PICK_HINT_SECONDS)
+    try:
+        result = pick.wait_for_target()
+    finally:
+        # 不管怎么结束都先清提示，再报结果：结果走 toast，提示位不留残影
+        emit_hint("")
     if result is None:
         toast("「先选窗口」只在 Windows 上可用")
         return
@@ -283,6 +306,9 @@ def apply_pick(family, face_id):
         return
     if reason == "timeout":
         toast("已取消：15 秒内没有选择窗口")
+        return
+    if reason == "cancelled":
+        toast("已取消")
         return
     toast("这不是 PS / AI / CDR 窗口，没有套用" + ("（%s）" % exe if exe else ""))
 

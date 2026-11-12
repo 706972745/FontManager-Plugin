@@ -118,7 +118,9 @@ def wait_for_target(timeout=TIMEOUT_SECONDS):
 
     - `("photoshop", "photoshop.exe", "hit")` —— 命中目标；
     - `(None, exe, "not-target")` —— 点到了别的软件（或任务栏宽限到期）；
-    - `(None, "", "timeout")` —— 15 秒内没点任何别的窗口。
+    - `(None, "", "timeout")` —— 15 秒内没点任何别的窗口；
+    - `(None, "", "cancelled")` —— 离开过之后又点回 FontManager 自己（1.9.10 的语义：
+      面板内的点击 / 回到面板 = 放弃这次套用，不用等满 15 秒）。
 
     非 Windows 返回 `None`（插件声明 platforms=Windows，但别让调用方踩到 ImportError）。
     """
@@ -134,6 +136,9 @@ def wait_for_target(timeout=TIMEOUT_SECONDS):
     cache = {}
     started = time.monotonic()
     explorer_since = None
+    # 有没有真的离开过 FontManager。只有「离开过又回来」才算取消 ——
+    # 刚点完双击时前台本来就是我们自己，那一下不能当成取消。
+    left_baseline = False
 
     while True:
         time.sleep(POLL_SECONDS)
@@ -144,12 +149,17 @@ def wait_for_target(timeout=TIMEOUT_SECONDS):
         if not fg or fg == baseline:
             # 又回到我们自己（FontManager）：中途那次绕路结束，清掉任务栏计时
             explorer_since = None
+            if left_baseline:
+                return (None, "", "cancelled")
             continue
+        left_baseline = True
 
         pid = wintypes.DWORD(0)
         _user32.GetWindowThreadProcessId(fg, ctypes.byref(pid))
         if not pid.value or pid.value == self_pid:
             explorer_since = None
+            if left_baseline:
+                return (None, "", "cancelled")
             continue
 
         exe = cache.get(pid.value)
