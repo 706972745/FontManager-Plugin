@@ -52,6 +52,12 @@
 |---|---|---|---|
 | [字体使用统计](font-stats/) | 1.1.2 | 右键字族 → 统计它的字面数与版权分类，结果写进该字族的备注 | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/font-stats.zip) |
 
+### 🎯 套用到设计软件
+
+| 插件 | 版本 | 说明 | 下载 |
+|---|---|---|---|
+| [字体套用（PS / AI / CDR）](font-apply/) | 1.1.1 | 右键任意字族 → 直接套到 Photoshop / Illustrator / CorelDRAW 当前选中的文字上；四条菜单（三个软件 + 「自动：最近在用的那个」）。**速览界面里双击任意可复制的位置也会套用**（主程序 1.9.12+，1.9.13 起仅限速览），双击行为可在插件设置里选「直接套用」或「先点一下目标窗口」。它是个**薄插件**：套用由主程序执行（`POST /fonts/apply`），插件只挑字重、认目标、翻提示，里面没有一行 COM / JSX / PowerShell —— 主程序修好的问题，插件不会拖后腿。要求 FontManager **1.9.11+**（常驻提示要 1.9.14+，CorelDRAW 字重修复在 1.9.20+） | [ZIP](https://github.com/706972745/FontManager-Plugin/releases/latest/download/font-apply.zip) |
+
 ### ☁️ 备份 / 多机同步
 
 | 插件 | 版本 | 说明 | 下载 |
@@ -64,6 +70,7 @@
 |---|---|---|---|---|---|
 | 示例文本导出 | Python 3.13 | ✅ `runtime/` | Pillow 13，已带 | 系统对话框组件 | Windows |
 | 字体使用统计 | Python 3.13 | ✅ `runtime/` | 无（纯标准库） | 无 | Windows |
+| 字体套用 | Python 3.10+ | ❌ 需软件/系统提供 | 无 | Windows PowerShell 5.1、Photoshop / Illustrator / CorelDRAW | Windows |
 | 字体库同步 | Python 3.10+ | ❌ 需软件/系统提供 | 无 | Windows 凭据管理器、DPAPI、浏览器 | Windows |
 | 你好，插件（模板） | Python 3.10+ | ❌ 需软件/系统提供 | 无 | 无 | 跨平台代码 |
 
@@ -74,7 +81,7 @@
 > 还需在浏览器登录对应 GitHub 账号验证，下载字体不需要验证。
 >
 > 📖 每个插件目录里都有自己的**详细教程**（菜单用法、依赖、自检与卸载）：
-> [示例文本导出](specimen-export/) · [字体使用统计](font-stats/) · [字体库同步](font-sync/) · [模板](template-hello/)
+> [示例文本导出](specimen-export/) · [字体使用统计](font-stats/) · [字体套用](font-apply/) · [字体库同步](font-sync/) · [模板](template-hello/)
 
 > 每个版本的变更（也是发布页正文的来源）记在 [CHANGELOG.md](CHANGELOG.md)；
 > 发布页的插件表与版本由 CI 从各插件 `plugin.json` 读取，不会和仓库脱节。

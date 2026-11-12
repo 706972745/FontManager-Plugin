@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths:
       - "font-sync/**"
+      - "font-apply/**"
       - "font-stats/**"
       - "specimen-export/**"
       - "template-hello/**"

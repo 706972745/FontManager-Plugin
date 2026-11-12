@@ -35,7 +35,7 @@ FONT_SYNC_CODE = ["plugin.json", "main.py", "panel.py", "panel.html", "gh.py", "
                   "store.py", "syncer.py", "verify.py", "README.md"]
 
 # 其它插件「整目录」打包：自带 runtime/，用户解压后直接是一个文件夹
-FULL_DIR_PLUGINS = ["font-stats", "specimen-export", "template-hello"]
+FULL_DIR_PLUGINS = ["font-apply", "font-stats", "specimen-export", "template-hello"]
 
 # 打包时一律跳过的东西（本地跑过就会有，进包只会变大）
 SKIP_DIRS = {"__pycache__", ".git", "dist", ".pytest_cache"}

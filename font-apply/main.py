@@ -217,6 +217,13 @@ def describe(outcome, app, label, family, active):
             family,
             name,
         )
+    if outcome == "font-rejected":
+        # 字体在列表里、赋值却不生效。CorelDRAW 实测：字体和文字的语言不匹配时
+        # 会静默拒绝（繁体字体套简体文字、或反过来），连逐字符赋值都不起作用。
+        return (
+            "%s 里有「%s」，但套不上 —— 多半是字体和文字的语言不匹配"
+            "（例如繁体字体套在简体文字上）。换一段拉丁文字或同语言字体再试"
+        ) % (name, label)
     if outcome == "no-document":
         return "%s 没打开文档" % name
     if outcome == "not-running":
