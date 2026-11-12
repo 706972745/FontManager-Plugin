@@ -14,7 +14,9 @@ CONFIG_PATH = os.path.join(HERE, "config.json")
 
 # auto = 双击直接套用到最近在用的设计软件；pick = 双击后先点一下目标窗口
 MODES = ("auto", "pick")
-DEFAULT_MODE = "auto"
+# 默认 pick：与 1.9.10 的第一版行为一致（双击 → 面板上出现「点一下要应用到的窗口」）。
+# auto 是后来加的加速选项，用户要在插件设置里主动选。
+DEFAULT_MODE = "pick"
 
 
 def load():
